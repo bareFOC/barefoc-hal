@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "barefoc-stm32",
+    "barefoc-esp32",
+    "barefoc-ch32",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/bareFOC/barefoc-hal"
+rust-version = "1.75"
+
+[workspace.dependencies]
+libm = "0.2"
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
+embedded-io = "0.6"
+nb = "1.0"
+rtic = "2.1"
+defmt = "0.3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

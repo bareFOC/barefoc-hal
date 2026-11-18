@@ -1,0 +1,42 @@
+[package]
+name = "barefoc-esp32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Official ESP32 hardware abstraction bridges for barefoc, ported from Arduino SimpleFOC."
+
+[dependencies]
+barefoc = { path = "../../barefoc" }
+# Portable BareBoot client core (bus triggers + cross-reset mailbox cookie).
+barefoc-boot = { path = "../../drivers/barefoc-boot", optional = true }
+embedded-hal = { workspace = true }
+libm = { workspace = true }
+
+# Optional dependencies for ESP32 hardware, RTOS, and Embassy integration
+esp-hal = { version = "~1.2.0", path = "../../ref/esp-hal/esp-hal", optional = true, default-features = false }
+esp-rtos = { version = "0.4.0", path = "../../ref/esp-hal/esp-rtos", optional = true, default-features = false }
+embassy-time = { version = "0.4", optional = true }
+
+[dev-dependencies]
+embedded-hal-mock = "0.10"
+
+[features]
+default = []
+
+## BareBoot handsfree entry (mailbox cookie + esp-hal software reset).
+## Requires a target-chip feature to provide `esp_hal::system::software_reset`.
+bareboot = ["dep:barefoc-boot"]
+
+## Enable Embassy time driver and async runtime integration
+embassy = ["dep:embassy-time", "esp-rtos?/embassy"]
+
+## Enable esp-rtos task scheduler with Embassy integration
+esp-rtos = ["dep:esp-rtos", "embassy"]
+
+## Target chip features
+esp32 = ["dep:esp-hal", "esp-hal?/esp32", "esp-rtos?/esp32"]
+esp32s3 = ["dep:esp-hal", "esp-hal?/esp32s3", "esp-rtos?/esp32s3"]
+esp32c3 = ["dep:esp-hal", "esp-hal?/esp32c3", "esp-rtos?/esp32c3"]
+esp32c6 = ["dep:esp-hal", "esp-hal?/esp32c6", "esp-rtos?/esp32c6"]

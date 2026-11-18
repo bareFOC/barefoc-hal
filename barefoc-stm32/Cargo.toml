@@ -1,0 +1,60 @@
+[package]
+name = "barefoc-stm32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Official STM32 hardware abstraction bridges for barefoc, ported from Arduino SimpleFOC."
+
+[dependencies]
+barefoc = { path = "../../barefoc" }
+# Portable BareBoot client core (bus triggers + cross-reset mailbox cookie).
+# Default-off; enabled by the `bareboot` / legacy `katapult` features.
+barefoc-boot = { path = "../../drivers/barefoc-boot", optional = true }
+embedded-hal = { workspace = true }
+libm = { workspace = true }
+critical-section = "1.2"
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+defmt = { workspace = true, optional = true }
+
+# barefoc-multibus register-map (control table) server core; every feature
+# build is a microcontroller address-bus host, so the host-only `std` default
+# feature stays off for target builds.
+barefoc-multibus = { path = "../../drivers/barefoc-multibus", optional = true, default-features = false }
+
+# Embassy STM32 HAL (git main; slave/target-mode APIs live here, not on crates.io 0.2.x)
+# NOTE: keep every embassy-* crate on this exact rev so cargo unifies one source.
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c", features = ["exti", "unstable-pac"], optional = true }
+# Q1.31 fixed-point values used by the embassy git CORDIC API (`Cordic::blocking_calc`).
+dsp-fixedpoint = "0.2"
+
+[features]
+default = []
+embassy-stm32 = ["dep:embassy-stm32"]
+# Exposes the STM32 bus-target adapters (`bus_target_i2c` / `bus_target_spi`)
+# on top of the `barefoc-multibus` register-pointer server core.
+multibus = ["dep:barefoc-multibus"]
+# BareBoot handsfree entry client (interrupt masking, mailbox cookie, reset).
+bareboot = ["dep:barefoc-boot"]
+# Legacy Katapult compatibility alias; kept so existing apps still compile.
+katapult = ["bareboot"]
+# Clean the mailbox DCache line on Cortex-M7 before SYSRESETREQ. Default off:
+# enabling on a non-M7 part executes illegal CP15 instructions.
+dcache-m7 = []
+stm32f4 = ["stm32f405rg"]
+stm32g4 = ["stm32g431cb"]
+stm32h5 = ["stm32h503kb"]
+stm32f405rg = ["dep:embassy-stm32", "embassy-stm32/stm32f405rg", "_stm32f4"]
+stm32f446re = ["dep:embassy-stm32", "embassy-stm32/stm32f446re", "_stm32f4"]
+stm32g431cb = ["dep:embassy-stm32", "embassy-stm32/stm32g431cb", "_stm32g4"]
+stm32g474re = ["dep:embassy-stm32", "embassy-stm32/stm32g474re", "embassy-stm32/dual-bank", "_stm32g4"]
+stm32h503kb = ["dep:embassy-stm32", "embassy-stm32/stm32h503kb", "_stm32h5"]
+_stm32f4 = []
+_stm32g4 = []
+_stm32h5 = []
+# RTT logging via defmt (also used by the bus-target adapters` rejection logs).
+# barefoc-multibus gets its own `defmt` feature so its error types implement
+# `defmt::Format` whenever this crate logs.
+defmt = ["dep:defmt", "barefoc-multibus/defmt"]
