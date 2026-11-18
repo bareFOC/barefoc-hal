@@ -10,7 +10,7 @@ description = "Official CH32 (WCH RISC-V) hardware abstraction bridges for baref
 [dependencies]
 barefoc = { path = "../../barefoc", default-features = false }
 # Portable BareBoot client core (bus triggers + cross-reset mailbox cookie).
-barefoc-boot = { path = "../../drivers/barefoc-boot", optional = true }
+barefoc-boot = { path = "../../barefoc-drivers/barefoc-boot", optional = true }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 

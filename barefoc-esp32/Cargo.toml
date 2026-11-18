@@ -10,7 +10,7 @@ description = "Official ESP32 hardware abstraction bridges for barefoc, ported f
 [dependencies]
 barefoc = { path = "../../barefoc" }
 # Portable BareBoot client core (bus triggers + cross-reset mailbox cookie).
-barefoc-boot = { path = "../../drivers/barefoc-boot", optional = true }
+barefoc-boot = { path = "../../barefoc-drivers/barefoc-boot", optional = true }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 
