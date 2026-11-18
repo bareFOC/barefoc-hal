@@ -8,9 +8,7 @@ rust-version.workspace = true
 description = "Official CH32 (WCH RISC-V) hardware abstraction bridges for barefoc, built on ch32-hal."
 
 [dependencies]
-barefoc = { path = "../../barefoc", default-features = false }
-# Portable BareBoot client core (bus triggers + cross-reset mailbox cookie).
-barefoc-boot = { path = "../../barefoc-drivers/barefoc-boot", optional = true }
+barefoc = { path = "../../bareFOC", default-features = false }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 
@@ -25,7 +23,7 @@ ch32-hal = { path = "../../ref/ch32-hal", optional = true, default-features = fa
 [features]
 default = []
 # BareBoot handsfree entry (RISC-V CSR disable + PFIC reset). Default off.
-bareboot = ["dep:barefoc-boot"]
+bareboot = ["barefoc/boot"]
 ch32-hal = ["dep:ch32-hal"]
 embassy-time = ["dep:embassy-time"]
 adc-v3 = []

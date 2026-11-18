@@ -28,7 +28,7 @@
 //! inspect; it only returns [`NotPresent`] when a non-zero `flash_base` is
 //! supplied and its vector table does not look like BareBoot.
 
-use barefoc_boot::{BootTarget, REQUEST_BOOTLOADER};
+use barefoc::boot::{self, BootTarget, REQUEST_BOOTLOADER};
 
 /// PFIC configuration register used for the WCH system reset.
 const PFIC_CFGR: *mut u32 = 0xE000_E048 as *mut u32;

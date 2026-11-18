@@ -8,10 +8,7 @@ rust-version.workspace = true
 description = "Official STM32 hardware abstraction bridges for barefoc, ported from Arduino SimpleFOC."
 
 [dependencies]
-barefoc = { path = "../../barefoc" }
-# Portable BareBoot client core (bus triggers + cross-reset mailbox cookie).
-# Default-off; enabled by the `bareboot` / legacy `katapult` features.
-barefoc-boot = { path = "../../barefoc-drivers/barefoc-boot", optional = true }
+barefoc = { path = "../../bareFOC", features = ["boot"] }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 critical-section = "1.2"
@@ -22,7 +19,7 @@ defmt = { workspace = true, optional = true }
 # barefoc-multibus register-map (control table) server core; every feature
 # build is a microcontroller address-bus host, so the host-only `std` default
 # feature stays off for target builds.
-barefoc-multibus = { path = "../../barefoc-drivers/barefoc-multibus", optional = true, default-features = false }
+barefoc-multibus = { path = "../../barefoc-comms/barefoc-multibus", optional = true, default-features = false }
 
 # Embassy STM32 HAL (git main; slave/target-mode APIs live here, not on crates.io 0.2.x)
 # NOTE: keep every embassy-* crate on this exact rev so cargo unifies one source.
@@ -37,7 +34,7 @@ embassy-stm32 = ["dep:embassy-stm32"]
 # on top of the `barefoc-multibus` register-pointer server core.
 multibus = ["dep:barefoc-multibus"]
 # BareBoot handsfree entry client (interrupt masking, mailbox cookie, reset).
-bareboot = ["dep:barefoc-boot"]
+bareboot = ["barefoc/boot"]
 # Legacy Katapult compatibility alias; kept so existing apps still compile.
 katapult = ["bareboot"]
 # Clean the mailbox DCache line on Cortex-M7 before SYSRESETREQ. Default off:

@@ -8,9 +8,7 @@ rust-version.workspace = true
 description = "Official ESP32 hardware abstraction bridges for barefoc, ported from Arduino SimpleFOC."
 
 [dependencies]
-barefoc = { path = "../../barefoc" }
-# Portable BareBoot client core (bus triggers + cross-reset mailbox cookie).
-barefoc-boot = { path = "../../barefoc-drivers/barefoc-boot", optional = true }
+barefoc = { path = "../../bareFOC" }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 
@@ -27,7 +25,7 @@ default = []
 
 ## BareBoot handsfree entry (mailbox cookie + esp-hal software reset).
 ## Requires a target-chip feature to provide `esp_hal::system::software_reset`.
-bareboot = ["dep:barefoc-boot"]
+bareboot = ["barefoc/boot"]
 
 ## Enable Embassy time driver and async runtime integration
 embassy = ["dep:embassy-time", "esp-rtos?/embassy"]

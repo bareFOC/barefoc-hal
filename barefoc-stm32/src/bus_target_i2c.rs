@@ -105,7 +105,7 @@
 //! ```
 
 #[cfg(feature = "bareboot")]
-use barefoc_boot::BootTarget;
+use barefoc::boot::BootTarget;
 use barefoc_multibus::transport::{RegServer, TargetTransport};
 use embassy_stm32::i2c::{self, I2c, Master, MultiMaster, SlaveAddrConfig, SlaveCommandKind};
 use embassy_stm32::mode::Blocking;
@@ -398,7 +398,7 @@ impl<'d, C, const CAP: usize, const MAX_ENTRIES: usize> Stm32I2cTarget<'d, C, CA
                 // docs / doc section 6).
                 #[cfg(feature = "bareboot")]
                 if let Some(target) = self.bootloader_target {
-                    if barefoc_boot::trigger_i2c(frame) {
+                    if barefoc::boot::trigger_i2c(frame) {
                         crate::bootloader::enter_bareboot(target);
                     }
                 }

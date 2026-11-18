@@ -40,7 +40,7 @@
 //! [`NotPresent`] when a non-zero `flash_base` is supplied and its vector table
 //! does not look like BareBoot.
 
-use barefoc_boot::{BootTarget, REQUEST_BOOTLOADER};
+use barefoc::boot::{self, BootTarget, REQUEST_BOOTLOADER};
 
 /// Build an ESP32 [`BootTarget`] from the top of internal SRAM.
 ///

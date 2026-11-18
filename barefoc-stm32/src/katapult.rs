@@ -17,10 +17,10 @@
 //! All items below are deprecated aliases; they forward to the current API
 //! rather than duplicating the mailbox/reset logic.
 
-#[deprecated(note = "use barefoc_boot::REQUEST_BOOTLOADER (or ::REQUEST_CANBOOT) instead")]
-pub const REQUEST_CANBOOT: u64 = barefoc_boot::REQUEST_BOOTLOADER;
+#[deprecated(note = "use barefoc::boot::REQUEST_BOOTLOADER (or ::REQUEST_CANBOOT) instead")]
+pub const REQUEST_CANBOOT: u64 = barefoc::boot::REQUEST_BOOTLOADER;
 
-#[deprecated(note = "use barefoc_boot::BootTarget / bootloader::default_target() instead")]
+#[deprecated(note = "use barefoc::boot::BootTarget / bootloader::default_target() instead")]
 pub const FLASH_BOOT_ADDRESS: usize = crate::bootloader::DEFAULT_FLASH_BASE as usize;
 
 #[deprecated(

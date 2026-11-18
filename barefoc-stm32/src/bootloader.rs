@@ -20,7 +20,7 @@
 //!
 //! # Presence policy (doc section 4.1)
 //!
-//! [`enter_bareboot`] calls [`barefoc_boot::BootTarget::is_present`] first:
+//! [`enter_bareboot`] calls [`barefoc::boot::BootTarget::is_present`] first:
 //!
 //! - **present** — write the cookie to the mailbox derived from the bootloader
 //!   vector table (`mailbox_addr()`), preserving the Katapult contract;
@@ -31,7 +31,7 @@
 //!   reset when no compatible bootloader is installed should use
 //!   [`request_bootloader_checked`], which returns [`NotPresent`] instead.
 
-use barefoc_boot::{BootTarget, REQUEST_BOOTLOADER};
+use barefoc::boot::{self, BootTarget, REQUEST_BOOTLOADER};
 
 /// Default bootloader flash base used by the legacy Katapult compatibility API.
 ///
@@ -160,7 +160,7 @@ pub fn enter_bareboot(target: BootTarget) -> ! {
 
     if target.is_present() {
         let mailbox = target.mailbox_addr();
-        barefoc_boot::write_cookie(&target);
+        boot::write_cookie(&target);
         reset_after_cookie(mailbox)
     } else {
         // No discoverable vector table: best-effort fallback mailbox.
@@ -185,11 +185,11 @@ pub fn request_bootloader_checked(target: BootTarget) -> Result<(), NotPresent> 
     }
     disable_irq_and_disarm();
     let mailbox = target.mailbox_addr();
-    barefoc_boot::write_cookie(&target);
+    boot::write_cookie(&target);
     reset_after_cookie(mailbox)
 }
 
 /// Compatibility wrapper: clears the cookie derived from `target`.
 pub fn clear_boot_cookie(target: BootTarget) {
-    barefoc_boot::clear_cookie(&target);
+    boot::clear_cookie(&target);
 }
