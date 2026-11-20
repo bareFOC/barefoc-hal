@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Official STM32 hardware abstraction bridges for barefoc, ported from Arduino SimpleFOC."
 
 [dependencies]
-barefoc = { path = "../../bareFOC", features = ["boot"] }
+barefoc = { path = "../../bareFOC", default-features = false, features = ["boot"] }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 critical-section = "1.2"
