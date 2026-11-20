@@ -392,7 +392,7 @@ mod tests {
 
         // 2. Modify table and save -> should write to Slot 0
         table.set_node_id(0x42);
-        table.write_f32(barefoc::control_table::REG_CURRENT_LIMIT, 2.5);
+        table.set_motor_phase_resistance(0, 2.5);
         storage.save_config(&table).unwrap();
 
         assert_eq!(storage.active_slot(), Some(0));
@@ -412,7 +412,7 @@ mod tests {
 
         assert_eq!(new_storage.active_slot(), Some(1));
         assert_eq!(boot_table.node_id(), 0x43);
-        assert_eq!(boot_table.current_limit(), 2.5);
+        assert_eq!(boot_table.motor_phase_resistance(0), 2.5);
         assert_eq!(boot_table.hardware_error_status() & error_flags::FLASH_CORRUPT, 0);
 
         // 5. Corrupt active slot header CRC and verify fallback to older valid slot 0
