@@ -17,12 +17,12 @@ pub mod bootloader;
 #[cfg(feature = "bareboot")]
 pub mod katapult;
 
-#[cfg(feature = "embassy-stm32")]
+pub mod any_sensor;
 pub mod clock;
+pub mod encoder;
+
 #[cfg(feature = "embassy-stm32")]
 pub mod driver_6pwm;
-#[cfg(feature = "embassy-stm32")]
-pub mod encoder;
 #[cfg(feature = "embassy-stm32")]
 pub mod foc_config;
 
@@ -48,12 +48,12 @@ pub use bootloader::{
     request_bootloader_checked, NotPresent, DEFAULT_APP_BASE, DEFAULT_FLASH_BASE, DEFAULT_SRAM_TOP,
 };
 
-#[cfg(feature = "embassy-stm32")]
+pub use any_sensor::{AnySensor, AnySensorBuildError, DummySensor, SensorType};
 pub use clock::DwtClock;
+pub use encoder::Stm32Encoder;
+
 #[cfg(feature = "embassy-stm32")]
 pub use driver_6pwm::Stm32BldcDriver6Pwm;
-#[cfg(feature = "embassy-stm32")]
-pub use encoder::Stm32Encoder;
 #[cfg(feature = "embassy-stm32")]
 pub use foc_config::FocConfig;
 

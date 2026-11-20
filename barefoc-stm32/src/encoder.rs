@@ -8,17 +8,34 @@
 
 use barefoc::common::time::Clock;
 use barefoc::traits::sensor::{Direction, Sensor, SensorBase};
+
+#[cfg(feature = "embassy-stm32")]
 use embassy_stm32::timer::qei::{Config, Direction as QeiDirection, Qei};
-use embassy_stm32::timer::{Ch1, Ch2, GeneralInstance4Channel, TimerPin};
+#[cfg(feature = "embassy-stm32")]
+pub use embassy_stm32::timer::GeneralInstance4Channel;
+#[cfg(feature = "embassy-stm32")]
+use embassy_stm32::timer::{Ch1, Ch2, TimerPin};
+#[cfg(feature = "embassy-stm32")]
 use embassy_stm32::Peri;
+
+#[cfg(not(feature = "embassy-stm32"))]
+pub trait GeneralInstance4Channel {}
+#[cfg(not(feature = "embassy-stm32"))]
+impl GeneralInstance4Channel for () {}
 
 /// Hardware Quadrature Encoder sensor backed by STM32 timer hardware QEI decoding.
 pub struct Stm32Encoder<'d, T: GeneralInstance4Channel> {
     base: SensorBase,
-    qei: Qei<'d, T>,
+    #[cfg(feature = "embassy-stm32")]
+    qei: Option<Qei<'d, T>>,
+    #[cfg(not(feature = "embassy-stm32"))]
+    _tim: core::marker::PhantomData<(&'d (), T)>,
+    mock_count: u32,
     cpr: u32,
+    direction: Direction,
 }
 
+#[cfg(feature = "embassy-stm32")]
 impl<'d, T: GeneralInstance4Channel> Stm32Encoder<'d, T> {
     /// Create a new hardware encoder instance.
     ///
@@ -38,8 +55,10 @@ impl<'d, T: GeneralInstance4Channel> Stm32Encoder<'d, T> {
 
         Self {
             base: SensorBase::new(),
-            qei,
+            qei: Some(qei),
+            mock_count: 0,
             cpr,
+            direction: Direction::CW,
         }
     }
 
@@ -47,14 +66,46 @@ impl<'d, T: GeneralInstance4Channel> Stm32Encoder<'d, T> {
     pub fn from_qei(qei: Qei<'d, T>, cpr: u32) -> Self {
         Self {
             base: SensorBase::new(),
-            qei,
+            qei: Some(qei),
+            mock_count: 0,
             cpr,
+            direction: Direction::CW,
+        }
+    }
+}
+
+impl<'d, T: GeneralInstance4Channel> Stm32Encoder<'d, T> {
+    /// Construct a mock encoder for testing or host simulation without hardware timer.
+    pub fn new_mock(count: u32, cpr: u32) -> Self {
+        Self {
+            base: SensorBase::new(),
+            #[cfg(feature = "embassy-stm32")]
+            qei: None,
+            #[cfg(not(feature = "embassy-stm32"))]
+            _tim: core::marker::PhantomData,
+            mock_count: count,
+            cpr,
+            direction: Direction::CW,
         }
     }
 
-    /// Read raw hardware timer counter value.
+    /// Set simulated raw count (for mock/testing).
+    pub fn set_count(&mut self, count: u32) {
+        self.mock_count = count;
+    }
+
+    /// Set simulated direction (for mock/testing).
+    pub fn set_direction(&mut self, direction: Direction) {
+        self.direction = direction;
+    }
+
+    /// Read raw hardware timer counter value or mock value.
     pub fn count(&self) -> u32 {
-        self.qei.count()
+        #[cfg(feature = "embassy-stm32")]
+        if let Some(ref qei) = self.qei {
+            return qei.count();
+        }
+        self.mock_count
     }
 
     /// Get configured Counts Per Revolution (CPR = 4 * PPR).
@@ -64,10 +115,14 @@ impl<'d, T: GeneralInstance4Channel> Stm32Encoder<'d, T> {
 
     /// Get current rotation direction from the hardware timer counter.
     pub fn direction(&self) -> Direction {
-        match self.qei.read_direction() {
-            QeiDirection::Upcounting => Direction::CW,
-            QeiDirection::Downcounting => Direction::CCW,
+        #[cfg(feature = "embassy-stm32")]
+        if let Some(ref qei) = self.qei {
+            return match qei.read_direction() {
+                QeiDirection::Upcounting => Direction::CW,
+                QeiDirection::Downcounting => Direction::CCW,
+            };
         }
+        self.direction
     }
 }
 
@@ -81,7 +136,7 @@ impl<'d, T: GeneralInstance4Channel, C: Clock> Sensor<C> for Stm32Encoder<'d, T>
     }
 
     fn get_sensor_angle(&self) -> f32 {
-        calc_encoder_angle(self.qei.count(), self.cpr)
+        calc_encoder_angle(self.count(), self.cpr)
     }
 }
 

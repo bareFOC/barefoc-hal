@@ -55,3 +55,6 @@ _stm32h5 = []
 # barefoc-multibus gets its own `defmt` feature so its error types implement
 # `defmt::Format` whenever this crate logs.
 defmt = ["dep:defmt", "barefoc-multibus/defmt"]
+
+[dev-dependencies]
+critical-section = { version = "1.2", features = ["std"] }
