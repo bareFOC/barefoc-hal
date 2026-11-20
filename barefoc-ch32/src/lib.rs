@@ -15,6 +15,7 @@ pub mod clock;
 pub mod bootloader;
 #[cfg(feature = "ch32-hal")]
 pub mod driver_6pwm;
+pub mod uid;
 
 #[cfg(feature = "ch32-hal")]
 pub use adc::Ch32AdcPin;
@@ -27,6 +28,7 @@ pub use bootloader::{
 pub use clock::Ch32Clock;
 #[cfg(feature = "ch32-hal")]
 pub use driver_6pwm::Ch32BldcDriver6Pwm;
+pub use uid::Ch32Uid;
 
 // Always-available helpers.
 pub mod util;

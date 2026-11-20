@@ -1,0 +1,16 @@
+[package]
+name = "barefoc-rp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Official Raspberry Pi RP2040 / RP2350 hardware abstraction bridges for barefoc."
+
+[dependencies]
+barefoc = { path = "../../bareFOC", default-features = false }
+embedded-hal = { workspace = true }
+libm = { workspace = true }
+
+[features]
+default = []

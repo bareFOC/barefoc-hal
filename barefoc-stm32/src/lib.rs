@@ -62,6 +62,9 @@ pub use cordic::Stm32G4Cordic;
 #[cfg(all(feature = "embassy-stm32", feature = "_stm32g4"))]
 pub use opamp::Stm32G4OpAmp;
 
+pub mod uid;
+pub use uid::Stm32Uid;
+
 pub mod stm32f4;
 pub mod stm32g4;
 pub mod stm32h5;

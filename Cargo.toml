@@ -4,6 +4,7 @@ members = [
     "barefoc-stm32",
     "barefoc-esp32",
     "barefoc-ch32",
+    "barefoc-rp",
 ]
 
 [workspace.package]

@@ -29,6 +29,7 @@ pub mod clock;
 pub mod ledc;
 pub mod mcpwm;
 pub mod pcnt;
+pub mod uid;
 
 pub use adc::{raw_to_voltage, voltage_to_current, Esp32AdcPin, Esp32CurrentSenseAdc};
 #[cfg(all(
@@ -52,3 +53,4 @@ pub use mcpwm::{
     calculate_mcpwm_period, deadtime_to_ticks, duty_to_compare, voltage_to_duty, Esp32McpwmDriver,
 };
 pub use pcnt::{calc_pcnt_angle, Esp32PcntSensor};
+pub use uid::Esp32Uid;
