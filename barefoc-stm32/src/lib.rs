@@ -37,6 +37,17 @@ pub mod bus_target_i2c;
 #[cfg(all(feature = "embassy-stm32", feature = "_stm32h5", feature = "multibus"))]
 pub mod bus_target_spi;
 
+/// Factory-calibrated internal temperature sensor; available on every
+/// supported STM32 family through the `internal-temp` feature (enabled
+/// automatically by the `stm32f4` / `stm32g4` / `stm32h5` family features).
+#[cfg(any(
+    feature = "internal-temp",
+    feature = "_stm32f4",
+    feature = "_stm32g4",
+    feature = "_stm32h5"
+))]
+pub mod temperature;
+
 #[cfg(feature = "bareboot")]
 #[allow(deprecated)]
 pub use katapult::{
@@ -57,6 +68,13 @@ pub use adc::{Stm32AdcPin, Stm32AdcPinFixed};
 pub use any_sensor::{AnySensor, AnySensorBuildError, DummySensor, SensorType};
 pub use clock::DwtClock;
 pub use encoder::Stm32Encoder;
+#[cfg(any(
+    feature = "internal-temp",
+    feature = "_stm32f4",
+    feature = "_stm32g4",
+    feature = "_stm32h5"
+))]
+pub use temperature::Stm32InternalTemp;
 
 #[cfg(feature = "embassy-stm32")]
 pub use driver_6pwm::Stm32BldcDriver6Pwm;

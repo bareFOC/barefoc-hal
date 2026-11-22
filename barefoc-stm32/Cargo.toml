@@ -51,9 +51,12 @@ stm32f446re = ["dep:embassy-stm32", "embassy-stm32/stm32f446re", "_stm32f4"]
 stm32g431cb = ["dep:embassy-stm32", "embassy-stm32/stm32g431cb", "_stm32g4"]
 stm32g474re = ["dep:embassy-stm32", "embassy-stm32/stm32g474re", "embassy-stm32/dual-bank", "_stm32g4"]
 stm32h503kb = ["dep:embassy-stm32", "embassy-stm32/stm32h503kb", "_stm32h5"]
-_stm32f4 = []
-_stm32g4 = []
-_stm32h5 = []
+_stm32f4 = ["internal-temp"]
+_stm32g4 = ["internal-temp"]
+_stm32h5 = ["internal-temp"]
+# Factory-calibrated internal temperature sensor (TS_CAL1 / TS_CAL2 words are
+# supplied by the family HAL; no calibration addresses live in the library).
+internal-temp = []
 # RTT logging via defmt (also used by the bus-target adapters` rejection logs).
 # barefoc-multibus gets its own `defmt` feature so its error types implement
 # `defmt::Format` whenever this crate logs.
