@@ -43,6 +43,119 @@ pub const DEFAULT_APP_BASE: u32 = 0x0800_2000;
 /// Default top of SRAM (STM32H503: 32 KiB at 0x20000000).
 pub const DEFAULT_SRAM_TOP: u32 = 0x2000_8000;
 
+/// Address of the uninitialized SRAM mailbox across warm resets on STM32H503.
+///
+/// Spans `0x2000_7FE0..0x2000_8000` (32 bytes at the top of 32 KiB SRAM).
+pub const SOFT_RESET_MAILBOX_ADDR: usize = 0x2000_7FE0;
+
+/// Cross-reset communication mailbox placed in uninitialized SRAM at `0x2000_7FE0`.
+///
+/// Preserves dynamically assigned bus address and transport selection across
+/// soft resets without flash memory wear. Total size is 32 bytes (`0x2000_7FE0..0x2000_8000`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SoftResetMailbox {
+    /// Katapult / BareBoot entry magic token (`0x5984_E3FA_6CA1_589B`).
+    pub magic: u64,
+    /// Active dynamic node ID on bus (e.g. 0x42).
+    pub dynamic_node_id: u8,
+    /// Communication bus type (0 = unspecified, 1 = I2C, 2 = I3C, 3 = CAN, 4 = UART).
+    pub bus_type: u8,
+    /// Reserved flags.
+    pub flags: u16,
+    /// Dynamic CAN assigned ID.
+    pub can_assigned_id: u32,
+    /// Reserved padding to 28 bytes before CRC32.
+    pub reserved: [u32; 3],
+    /// IEEE 802.3 CRC32 calculated over bytes 0..28.
+    pub crc32: u32,
+}
+
+impl SoftResetMailbox {
+    pub const MAGIC: u64 = REQUEST_BOOTLOADER;
+
+    /// Create a new `SoftResetMailbox` with the given dynamic node ID and bus type.
+    pub fn new(dynamic_node_id: u8, bus_type: u8) -> Self {
+        let mut mb = Self {
+            magic: Self::MAGIC,
+            dynamic_node_id,
+            bus_type,
+            flags: 0,
+            can_assigned_id: 0,
+            reserved: [0; 3],
+            crc32: 0,
+        };
+        mb.crc32 = mb.compute_crc32();
+        mb
+    }
+
+    /// Compute IEEE 802.3 CRC32 over the first 28 bytes.
+    pub fn compute_crc32(&self) -> u32 {
+        let mut bytes = [0u8; 28];
+        bytes[0..8].copy_from_slice(&self.magic.to_le_bytes());
+        bytes[8] = self.dynamic_node_id;
+        bytes[9] = self.bus_type;
+        bytes[10..12].copy_from_slice(&self.flags.to_le_bytes());
+        bytes[12..16].copy_from_slice(&self.can_assigned_id.to_le_bytes());
+        bytes[16..20].copy_from_slice(&self.reserved[0].to_le_bytes());
+        bytes[20..24].copy_from_slice(&self.reserved[1].to_le_bytes());
+        bytes[24..28].copy_from_slice(&self.reserved[2].to_le_bytes());
+        crc32_ieee(&bytes)
+    }
+
+    /// Check whether the mailbox holds the magic token and a valid CRC32.
+    pub fn is_valid(&self) -> bool {
+        self.magic == Self::MAGIC && self.crc32 == self.compute_crc32()
+    }
+
+    /// Write this mailbox volatilely to an SRAM address.
+    pub unsafe fn write_to_addr(&self, addr: usize) {
+        let ptr = addr as *mut SoftResetMailbox;
+        core::ptr::write_volatile(ptr, *self);
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Standard IEEE 802.3 CRC32 calculation.
+pub fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in data {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+static mut ACTIVE_DYNAMIC_NODE_ID: Option<u8> = None;
+static mut ACTIVE_BUS_TYPE: u8 = 0;
+
+/// Set the active dynamic node ID to be written to `SoftResetMailbox` on reset.
+pub fn set_active_dynamic_node_id(node_id: u8) {
+    unsafe {
+        ACTIVE_DYNAMIC_NODE_ID = Some(node_id);
+    }
+}
+
+/// Query the active dynamic node ID if one has been set.
+pub fn get_active_dynamic_node_id() -> Option<u8> {
+    unsafe { ACTIVE_DYNAMIC_NODE_ID }
+}
+
+/// Set the active communication bus type.
+pub fn set_active_bus_type(bus_type: u8) {
+    unsafe {
+        ACTIVE_BUS_TYPE = bus_type;
+    }
+}
+
+/// Query the active communication bus type.
+pub fn get_active_bus_type() -> u8 {
+    unsafe { ACTIVE_BUS_TYPE }
+}
+
 /// The [`BootTarget`] used by the legacy `katapult` compatibility helpers.
 pub fn default_target() -> BootTarget {
     BootTarget::new(DEFAULT_FLASH_BASE, DEFAULT_APP_BASE, DEFAULT_SRAM_TOP)
@@ -153,10 +266,24 @@ fn reset_after_cookie(mailbox: usize) -> ! {
 ///
 /// Presence policy: if the bootloader appears present the cookie is written
 /// through `barefoc-boot` to the derived mailbox; otherwise the fallback
-/// mailbox (`sram_top - 8`) is used (see module-level docs). Interrupts are
-/// masked and the driver-disarm hook runs before either write.
+/// mailbox (`sram_top - 8`) is used (see module-level docs).
+/// Additionally, the [`SoftResetMailbox`] containing dynamic address and CRC32
+/// is written to [`SOFT_RESET_MAILBOX_ADDR`] (`0x2000_7FE0`).
+/// Interrupts are masked and the driver-disarm hook runs before either write.
 pub fn enter_bareboot(target: BootTarget) -> ! {
+    let node_id = get_active_dynamic_node_id().unwrap_or(0x40);
+    let bus_type = get_active_bus_type();
+    enter_bareboot_with_node_id(target, node_id, bus_type)
+}
+
+/// Perform handsfree BareBoot entry with explicit dynamic node ID and bus type. Never returns.
+pub fn enter_bareboot_with_node_id(target: BootTarget, dynamic_node_id: u8, bus_type: u8) -> ! {
     disable_irq_and_disarm();
+
+    let mailbox = SoftResetMailbox::new(dynamic_node_id, bus_type);
+    unsafe {
+        mailbox.write_to_addr(SOFT_RESET_MAILBOX_ADDR);
+    }
 
     if target.is_present() {
         let mailbox = target.mailbox_addr();
@@ -180,10 +307,27 @@ pub fn enter_bareboot(target: BootTarget) -> ! {
 /// `target.is_present()` is false, so an application without a patched
 /// bootloader can keep running. See the module-level "Presence policy".
 pub fn request_bootloader_checked(target: BootTarget) -> Result<(), NotPresent> {
+    let node_id = get_active_dynamic_node_id().unwrap_or(0x40);
+    let bus_type = get_active_bus_type();
+    request_bootloader_checked_with_node_id(target, node_id, bus_type)
+}
+
+/// Checked variant of [`enter_bareboot`] with explicit dynamic node ID and bus type.
+pub fn request_bootloader_checked_with_node_id(
+    target: BootTarget,
+    dynamic_node_id: u8,
+    bus_type: u8,
+) -> Result<(), NotPresent> {
     if !target.is_present() {
         return Err(NotPresent);
     }
     disable_irq_and_disarm();
+
+    let mailbox = SoftResetMailbox::new(dynamic_node_id, bus_type);
+    unsafe {
+        mailbox.write_to_addr(SOFT_RESET_MAILBOX_ADDR);
+    }
+
     let mailbox = target.mailbox_addr();
     boot::write_cookie(&target);
     reset_after_cookie(mailbox)
@@ -192,4 +336,47 @@ pub fn request_bootloader_checked(target: BootTarget) -> Result<(), NotPresent> 
 /// Compatibility wrapper: clears the cookie derived from `target`.
 pub fn clear_boot_cookie(target: BootTarget) {
     boot::clear_cookie(&target);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_soft_reset_mailbox_layout_and_size() {
+        assert_eq!(core::mem::size_of::<SoftResetMailbox>(), 32);
+        assert_eq!(core::mem::align_of::<SoftResetMailbox>(), 8);
+        assert_eq!(SOFT_RESET_MAILBOX_ADDR, 0x2000_7FE0);
+    }
+
+    #[test]
+    fn test_crc32_ieee_known_vector() {
+        assert_eq!(crc32_ieee(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
+    fn test_soft_reset_mailbox_creation_and_validation() {
+        let mb = SoftResetMailbox::new(0x42, 2);
+        assert_eq!(mb.magic, REQUEST_BOOTLOADER);
+        assert_eq!(mb.dynamic_node_id, 0x42);
+        assert_eq!(mb.bus_type, 2);
+        assert!(mb.is_valid());
+
+        let mut corrupted = mb;
+        corrupted.dynamic_node_id = 0x43;
+        assert!(!corrupted.is_valid());
+
+        corrupted = mb;
+        corrupted.magic = 0x1234;
+        assert!(!corrupted.is_valid());
+    }
+
+    #[test]
+    fn test_active_node_id_and_bus_type_state() {
+        set_active_dynamic_node_id(0x55);
+        assert_eq!(get_active_dynamic_node_id(), Some(0x55));
+
+        set_active_bus_type(3);
+        assert_eq!(get_active_bus_type(), 3);
+    }
 }
