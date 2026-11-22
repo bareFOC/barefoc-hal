@@ -97,6 +97,8 @@ pub enum SensorType {
     Hall = 6,
     /// 7: Virtual dummy sensor for open-loop diagnostics
     Virtual = 7,
+    /// 8: TMAG5273 3D magnetic angle sensor via I2C
+    Tmag5273 = 8,
 }
 
 impl TryFrom<u8> for SensorType {
@@ -112,6 +114,7 @@ impl TryFrom<u8> for SensorType {
             5 => Ok(Self::EncoderQei),
             6 => Ok(Self::Hall),
             7 => Ok(Self::Virtual),
+            8 => Ok(Self::Tmag5273),
             other => Err(other),
         }
     }
@@ -152,6 +155,9 @@ pub enum AnySensor<
     Hall(HallSensor<C>),
     /// Virtual sensor for open-loop testing and diagnostics
     Virtual(DummySensor),
+    /// TMAG5273 3D magnetic angle sensor via I2C
+    #[cfg(feature = "tmag")]
+    Tmag5273(tmag_rs::barefoc::Tmag5273Sensor<I2C>),
     /// Safe unconfigured fallback returning 0.0 rad
     Unconfigured(SensorBase),
 }
@@ -182,6 +188,8 @@ impl<
             Self::Hall(s) => s.get_sensor_angle(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::get_sensor_angle(s),
             Self::Unconfigured(_) => 0.0,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::get_sensor_angle(s),
         }
     }
 
@@ -194,6 +202,8 @@ impl<
             Self::Hall(s) => s.base(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::base(s),
             Self::Unconfigured(b) => b,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::base(s),
         }
     }
 
@@ -206,6 +216,8 @@ impl<
             Self::Hall(s) => s.base_mut(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::base_mut(s),
             Self::Unconfigured(b) => b,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::base_mut(s),
         }
     }
 
@@ -218,6 +230,8 @@ impl<
             Self::Hall(s) => <HallSensor<C> as Sensor<C>>::init(s, clock),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::init(s, clock),
             Self::Unconfigured(_) => {},
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::init(s, clock),
         }
     }
 
@@ -230,6 +244,8 @@ impl<
             Self::Hall(s) => s.update(clock),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::update(s, clock),
             Self::Unconfigured(_) => {},
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::update(s, clock),
         }
     }
 
@@ -242,6 +258,8 @@ impl<
             Self::Hall(s) => s.get_mechanical_angle(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::get_mechanical_angle(s),
             Self::Unconfigured(_) => 0.0,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::get_mechanical_angle(s),
         }
     }
 
@@ -254,6 +272,8 @@ impl<
             Self::Hall(s) => s.get_angle(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::get_angle(s),
             Self::Unconfigured(_) => 0.0,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::get_angle(s),
         }
     }
 
@@ -266,6 +286,8 @@ impl<
             Self::Hall(s) => s.get_precise_angle(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::get_precise_angle(s),
             Self::Unconfigured(_) => 0.0,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::get_precise_angle(s),
         }
     }
 
@@ -278,6 +300,8 @@ impl<
             Self::Hall(s) => s.get_velocity(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::get_velocity(s),
             Self::Unconfigured(_) => 0.0,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::get_velocity(s),
         }
     }
 
@@ -290,6 +314,8 @@ impl<
             Self::Hall(s) => s.get_full_rotations(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::get_full_rotations(s),
             Self::Unconfigured(b) => b.full_rotations,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::get_full_rotations(s),
         }
     }
 
@@ -302,6 +328,8 @@ impl<
             Self::Hall(s) => s.needs_search(),
             Self::Virtual(s) => <DummySensor as Sensor<C>>::needs_search(s),
             Self::Unconfigured(_) => 0,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(s) => <tmag_rs::barefoc::Tmag5273Sensor<I2C> as Sensor<C>>::needs_search(s),
         }
     }
 }
@@ -377,6 +405,42 @@ impl<
         Self::Hall(hall)
     }
 
+    /// Helper constructor for TMAG5273 I2C sensor adapter.
+    #[cfg(feature = "tmag")]
+    pub fn new_tmag5273(sensor: tmag_rs::barefoc::Tmag5273Sensor<I2C>) -> Self {
+        Self::Tmag5273(sensor)
+    }
+
+    /// Helper constructor for TMAG5273 from a configured Tmag5273 driver.
+    #[cfg(feature = "tmag")]
+    pub fn from_tmag5273(driver: tmag_rs::Tmag5273<I2C>) -> Self {
+        Self::Tmag5273(tmag_rs::barefoc::Tmag5273Sensor::new(driver))
+    }
+
+    /// Helper constructor for TMAG5273 from an I2C bus and default candidate address 0x35.
+    #[cfg(feature = "tmag")]
+    pub fn from_i2c_tmag5273(i2c: I2C) -> Self {
+        Self::from_tmag5273(tmag_rs::Tmag5273::new_uninit(i2c, 0x35))
+    }
+
+    /// Borrow the TMAG5273 sensor if active.
+    #[cfg(feature = "tmag")]
+    pub fn as_tmag5273(&self) -> Option<&tmag_rs::barefoc::Tmag5273Sensor<I2C>> {
+        match self {
+            Self::Tmag5273(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Mutably borrow the TMAG5273 sensor if active.
+    #[cfg(feature = "tmag")]
+    pub fn as_tmag5273_mut(&mut self) -> Option<&mut tmag_rs::barefoc::Tmag5273Sensor<I2C>> {
+        match self {
+            Self::Tmag5273(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// Switch the active variant in place at runtime (zero-heap).
     pub fn switch_variant(&mut self, new_variant: Self) {
         *self = new_variant;
@@ -422,6 +486,8 @@ impl<
             Self::Hall(_) => Some(SensorType::Hall),
             Self::Virtual(_) => Some(SensorType::Virtual),
             Self::Unconfigured(_) => None,
+            #[cfg(feature = "tmag")]
+            Self::Tmag5273(_) => Some(SensorType::Tmag5273),
         }
     }
 
@@ -521,6 +587,11 @@ impl<
                 Ok(Self::from_hall(h))
             }
             7 => Ok(Self::new_virtual()),
+            #[cfg(feature = "tmag")]
+            8 => {
+                let i = i2c.ok_or(AnySensorBuildError::MissingI2cPeripheral)?;
+                Ok(Self::from_i2c_tmag5273(i))
+            }
             other => Err(AnySensorBuildError::InvalidSensorType(other)),
         }
     }
@@ -557,6 +628,7 @@ mod tests {
     }
 
     /// Mock I2C device implementing embedded-hal v1.0.
+    #[derive(Clone, Copy)]
     struct MockI2c {
         angle_word: u16,
     }
@@ -792,6 +864,13 @@ mod tests {
         // Test 7: Virtual
         let s7 = TestAnySensor::build_from_type(7, None, None, None, None).unwrap();
         assert_eq!(s7.sensor_type(), Some(SensorType::Virtual));
+
+        // Test 8: TMAG5273
+        #[cfg(feature = "tmag")]
+        {
+            let s8 = TestAnySensor::build_from_type(8, Some(i2c), None, None, None).unwrap();
+            assert_eq!(s8.sensor_type(), Some(SensorType::Tmag5273));
+        }
 
         // Missing peripheral errors
         let err1 = TestAnySensor::build_from_type(1, None, None, None, None);

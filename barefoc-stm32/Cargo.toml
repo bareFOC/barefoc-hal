@@ -20,6 +20,7 @@ defmt = { workspace = true, optional = true }
 # build is a microcontroller address-bus host, so the host-only `std` default
 # feature stays off for target builds.
 barefoc-multibus = { path = "../../barefoc-comms/barefoc-multibus", optional = true, default-features = false }
+tmag-rs = { path = "../../barefoc-drivers/tmag-rs", optional = true, default-features = false, features = ["barefoc"] }
 
 # Embassy STM32 HAL (git main; slave/target-mode APIs live here, not on crates.io 0.2.x)
 # NOTE: keep every embassy-* crate on this exact rev so cargo unifies one source.
@@ -33,6 +34,8 @@ embassy-stm32 = ["dep:embassy-stm32"]
 # Exposes the STM32 bus-target adapters (`bus_target_i2c` / `bus_target_spi`)
 # on top of the `barefoc-multibus` register-pointer server core.
 multibus = ["dep:barefoc-multibus"]
+# TMAG5273 3D magnetic angle sensor driver and AnySensor adapter.
+tmag = ["dep:tmag-rs"]
 # BareBoot handsfree entry client (interrupt masking, mailbox cookie, reset).
 bareboot = ["barefoc/boot"]
 # Legacy Katapult compatibility alias; kept so existing apps still compile.
@@ -58,3 +61,4 @@ defmt = ["dep:defmt", "barefoc-multibus/defmt"]
 
 [dev-dependencies]
 critical-section = { version = "1.2", features = ["std"] }
+tmag-rs = { path = "../../barefoc-drivers/tmag-rs", default-features = false, features = ["barefoc"] }

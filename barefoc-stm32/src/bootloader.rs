@@ -31,7 +31,7 @@
 //!   reset when no compatible bootloader is installed should use
 //!   [`request_bootloader_checked`], which returns [`NotPresent`] instead.
 
-use barefoc::boot::{self, BootTarget, REQUEST_BOOTLOADER};
+use barefoc::boot::{self, BootTarget, REQUEST_APP, REQUEST_BOOTLOADER, REQUEST_START_APP};
 
 /// Default bootloader flash base used by the legacy Katapult compatibility API.
 ///
@@ -73,11 +73,18 @@ pub struct SoftResetMailbox {
 
 impl SoftResetMailbox {
     pub const MAGIC: u64 = REQUEST_BOOTLOADER;
+    pub const MAGIC_APP: u64 = REQUEST_APP;
+    pub const MAGIC_START_APP: u64 = REQUEST_START_APP;
 
-    /// Create a new `SoftResetMailbox` with the given dynamic node ID and bus type.
+    /// Create a new `SoftResetMailbox` with the default bootloader request magic token.
     pub fn new(dynamic_node_id: u8, bus_type: u8) -> Self {
+        Self::with_magic(Self::MAGIC, dynamic_node_id, bus_type)
+    }
+
+    /// Create a new `SoftResetMailbox` with custom magic token, dynamic node ID, and bus type.
+    pub fn with_magic(magic: u64, dynamic_node_id: u8, bus_type: u8) -> Self {
         let mut mb = Self {
-            magic: Self::MAGIC,
+            magic,
             dynamic_node_id,
             bus_type,
             flags: 0,
@@ -103,9 +110,12 @@ impl SoftResetMailbox {
         crc32_ieee(&bytes)
     }
 
-    /// Check whether the mailbox holds the magic token and a valid CRC32.
+    /// Check whether the mailbox holds a valid magic token and a valid CRC32.
+    ///
+    /// Accepts [`REQUEST_BOOTLOADER`], [`REQUEST_APP`], and [`REQUEST_START_APP`].
     pub fn is_valid(&self) -> bool {
-        self.magic == Self::MAGIC && self.crc32 == self.compute_crc32()
+        (self.magic == Self::MAGIC || self.magic == REQUEST_APP || self.magic == REQUEST_START_APP)
+            && self.crc32 == self.compute_crc32()
     }
 
     /// Write this mailbox volatilely to an SRAM address.
@@ -113,6 +123,22 @@ impl SoftResetMailbox {
         let ptr = addr as *mut SoftResetMailbox;
         core::ptr::write_volatile(ptr, *self);
         core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Read the uninitialized SRAM soft-reset mailbox at [`SOFT_RESET_MAILBOX_ADDR`].
+///
+/// Returns `Some(SoftResetMailbox)` if the mailbox exists, holds a valid magic token
+/// (`REQUEST_BOOTLOADER`, `REQUEST_APP`, or `REQUEST_START_APP`), and passes IEEE 802.3 CRC32 verification.
+pub fn read_soft_reset_mailbox() -> Option<SoftResetMailbox> {
+    unsafe {
+        let ptr = SOFT_RESET_MAILBOX_ADDR as *const SoftResetMailbox;
+        let mb = core::ptr::read_volatile(ptr);
+        if mb.is_valid() {
+            Some(mb)
+        } else {
+            None
+        }
     }
 }
 
@@ -361,6 +387,13 @@ mod tests {
         assert_eq!(mb.dynamic_node_id, 0x42);
         assert_eq!(mb.bus_type, 2);
         assert!(mb.is_valid());
+
+        // Test REQUEST_APP and REQUEST_START_APP
+        let mb_app = SoftResetMailbox::with_magic(REQUEST_APP, 0x42, 1);
+        assert!(mb_app.is_valid());
+
+        let mb_start_app = SoftResetMailbox::with_magic(REQUEST_START_APP, 0x42, 1);
+        assert!(mb_start_app.is_valid());
 
         let mut corrupted = mb;
         corrupted.dynamic_node_id = 0x43;

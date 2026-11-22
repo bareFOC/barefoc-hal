@@ -17,6 +17,7 @@ pub mod bootloader;
 #[cfg(feature = "bareboot")]
 pub mod katapult;
 
+pub mod adc;
 pub mod any_sensor;
 pub mod clock;
 pub mod encoder;
@@ -46,11 +47,13 @@ pub use katapult::{
 pub use bootloader::{
     before_reset_hook, clear_before_reset_hook, default_target, enter_bareboot,
     enter_bareboot_with_node_id, get_active_bus_type, get_active_dynamic_node_id,
-    request_bootloader_checked, request_bootloader_checked_with_node_id, set_active_bus_type,
+    read_soft_reset_mailbox, request_bootloader_checked,
+    request_bootloader_checked_with_node_id, set_active_bus_type,
     set_active_dynamic_node_id, NotPresent, SoftResetMailbox, DEFAULT_APP_BASE, DEFAULT_FLASH_BASE,
     DEFAULT_SRAM_TOP, SOFT_RESET_MAILBOX_ADDR,
 };
 
+pub use adc::{Stm32AdcPin, Stm32AdcPinFixed};
 pub use any_sensor::{AnySensor, AnySensorBuildError, DummySensor, SensorType};
 pub use clock::DwtClock;
 pub use encoder::Stm32Encoder;
