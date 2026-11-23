@@ -273,7 +273,7 @@ pub struct Stm32SpiTarget<'d, C, const CAP: usize, const MAX_ENTRIES: usize> {
     /// Total bytes fetched from the map for the current reply window.
     tx_taken_total: usize,
     /// Map pointer latched before the current reply window's first refill.
-    tx_src_ptr: u8,
+    tx_src_ptr: u16,
     /// `true` once a pointer-latch frame (1 command byte, applied) ended a
     /// window: the *next* CS window is serviced as a reply burst.
     armed: bool,
