@@ -27,6 +27,10 @@ pub mod driver_6pwm;
 #[cfg(feature = "embassy-stm32")]
 pub mod foc_config;
 
+/// Blocking `embedded_io` bridge over embassy-usb CDC ACM for passthrough.
+#[cfg(feature = "usb-cdc-passthrough")]
+pub mod usb_cdc;
+
 #[cfg(all(feature = "embassy-stm32", feature = "_stm32g4"))]
 pub mod cordic;
 #[cfg(all(feature = "embassy-stm32", feature = "_stm32g4"))]

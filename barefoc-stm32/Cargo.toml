@@ -10,6 +10,7 @@ description = "Official STM32 hardware abstraction bridges for barefoc, ported f
 [dependencies]
 barefoc = { path = "../../bareFOC", default-features = false, features = ["boot"] }
 embedded-hal = { workspace = true }
+embedded-io = { workspace = true, optional = true }
 libm = { workspace = true }
 critical-section = "1.2"
 cortex-m = "0.7"
@@ -27,6 +28,13 @@ tmag-rs = { path = "../../barefoc-drivers/tmag-rs", optional = true, default-fea
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c", features = ["exti", "unstable-pac"], optional = true }
 # Q1.31 fixed-point values used by the embassy git CORDIC API (`Cordic::blocking_calc`).
 dsp-fixedpoint = "0.2"
+
+# Blocking `embedded-io` bridge for the device-side passthrough server over an
+# embassy-usb CDC ACM stream. crates.io releases are used here so the HAL
+# workspace (which also contains the CH32 HAL) keeps a single `embassy-time`
+# links provider; applications pin the git rev alongside embassy-stm32.
+embassy-usb = { version = "0.6", optional = true }
+embassy-futures = { version = "0.1", optional = true }
 
 [features]
 default = []
@@ -57,6 +65,10 @@ _stm32h5 = ["internal-temp"]
 # Factory-calibrated internal temperature sensor (TS_CAL1 / TS_CAL2 words are
 # supplied by the family HAL; no calibration addresses live in the library).
 internal-temp = []
+# Blocking embedded-io stream over embassy-usb CDC ACM for the passthrough
+# server. The USB peripheral itself is wired by the application; this feature
+# only supplies the `Read`/`Write` bridge and is opt-in.
+usb-cdc-passthrough = ["dep:embedded-io", "dep:embassy-usb", "dep:embassy-futures"]
 # RTT logging via defmt (also used by the bus-target adapters` rejection logs).
 # barefoc-multibus gets its own `defmt` feature so its error types implement
 # `defmt::Format` whenever this crate logs.
