@@ -60,8 +60,8 @@ pub use katapult::{
 
 #[cfg(feature = "bareboot")]
 pub use bootloader::{
-    before_reset_hook, clear_before_reset_hook, default_target, enter_bareboot,
-    enter_bareboot_with_node_id, get_active_bus_type, get_active_dynamic_node_id,
+    barefoc_failsafe_recovery, before_reset_hook, clear_before_reset_hook, default_target,
+    enter_bareboot, enter_bareboot_with_node_id, get_active_bus_type, get_active_dynamic_node_id,
     read_soft_reset_mailbox, request_bootloader_checked,
     request_bootloader_checked_with_node_id, set_active_bus_type,
     set_active_dynamic_node_id, NotPresent, SoftResetMailbox, DEFAULT_APP_BASE, DEFAULT_FLASH_BASE,

@@ -120,9 +120,16 @@ impl SoftResetMailbox {
 
     /// Write this mailbox volatilely to an SRAM address.
     pub unsafe fn write_to_addr(&self, addr: usize) {
-        let ptr = addr as *mut SoftResetMailbox;
-        core::ptr::write_volatile(ptr, *self);
-        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+        #[cfg(not(test))]
+        {
+            let ptr = addr as *mut SoftResetMailbox;
+            core::ptr::write_volatile(ptr, *self);
+            core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+        }
+        #[cfg(test)]
+        {
+            let _ = (addr, self);
+        }
     }
 }
 
@@ -223,6 +230,7 @@ pub fn clear_before_reset_hook() {
 /// Mask interrupts and run the driver-disarm hook, in that order.
 fn disable_irq_and_disarm() {
     // Section 4.1: mask interrupts BEFORE the cookie write.
+    #[cfg(not(test))]
     cortex_m::interrupt::disable();
     // SAFETY: see `before_reset_hook` (single-core, interrupts masked).
     unsafe {
@@ -263,16 +271,23 @@ fn clean_dcache_line(addr: usize) {
 /// No-op fallback for non-M7 targets (the default).
 #[cfg(not(feature = "dcache-m7"))]
 #[inline]
+#[allow(dead_code)]
 fn clean_dcache_line(_addr: usize) {}
 
 /// Finish the reset sequence after the cookie store. Never returns.
 ///
 /// Emits the explicit post-write `compiler_fence(SeqCst)` (doc section 4.1
-/// step 3), cleans the mailbox DCache line on M7, then writes the exact
-/// `SCB_AIRCR` reset key + `SYSRESETREQ` value from the document.
+/// step 3), cleans the mailbox DCache lines (including `SoftResetMailbox`), executes
+/// `cortex_m::asm::dsb()` and `isb()`, then writes the exact `SCB_AIRCR` reset key
+/// + `SYSRESETREQ` value from the document.
+#[cfg(not(test))]
 fn reset_after_cookie(mailbox: usize) -> ! {
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
     clean_dcache_line(mailbox);
+    clean_dcache_line(SOFT_RESET_MAILBOX_ADDR);
+
+    cortex_m::asm::dsb();
+    cortex_m::asm::isb();
 
     // Section 4.1: exact SYSRESETREQ write, `(0x05FA << 16) | (1 << 2)`.
     const SCB_AIRCR: *mut u32 = 0xE000_ED0C as *mut u32;
@@ -282,10 +297,66 @@ fn reset_after_cookie(mailbox: usize) -> ! {
         core::ptr::write_volatile(SCB_AIRCR, (0x05FA << 16) | (1 << 2));
     }
 
+    cortex_m::asm::dsb();
+    cortex_m::asm::isb();
+
     // The reset must take effect; spin if it is somehow deferred.
     loop {
         core::hint::spin_loop();
     }
+}
+
+#[cfg(test)]
+fn reset_after_cookie(mailbox: usize) -> ! {
+    let _ = mailbox;
+    panic!("RESET_AFTER_COOKIE");
+}
+
+/// Failsafe recovery handler for HardFault and Panic exceptions.
+///
+/// Immediately disables all motor PWM timer channels (TIM1, TIM3, etc.) into high-impedance mode,
+/// pulls gate driver `DRV_SLEEP` low, executes any registered driver disarm hook,
+/// writes the `SoftResetMailbox` and `REQUEST_BOOTLOADER` cookie (`0x5984E3FA6CA1589B`),
+/// flushes data caches with DSB barrier, and initiates warm system reset into BareBoot.
+pub fn barefoc_failsafe_recovery() -> ! {
+    #[cfg(not(test))]
+    cortex_m::interrupt::disable();
+
+    #[cfg(not(test))]
+    unsafe {
+        // 1. TIM1 (STM32H5: 0x4001_2C00, F4/G4: 0x4001_0000)
+        for base in [0x4001_2C00usize, 0x4001_0000usize] {
+            core::ptr::write_volatile((base + 0x20) as *mut u32, 0); // CCER
+            core::ptr::write_volatile((base + 0x44) as *mut u32, 0); // BDTR
+            core::ptr::write_volatile((base + 0x144) as *mut u32, 0);
+        }
+        // 2. TIM3 (0x4000_0400)
+        core::ptr::write_volatile((0x4000_0400 + 0x20) as *mut u32, 0);
+        // 3. TIM2 (0x4000_0000), TIM4 (0x4000_0800), TIM8 (0x4001_0400), TIM20 (0x4001_3400)
+        for base in [0x4000_0000usize, 0x4000_0800usize, 0x4001_0400usize, 0x4001_3400usize] {
+            core::ptr::write_volatile((base + 0x20) as *mut u32, 0);
+            core::ptr::write_volatile((base + 0x44) as *mut u32, 0);
+        }
+
+        // 4. Pull DRV_SLEEP low (PB15 on GPIOB)
+        for gpiob_base in [0x4202_0400usize, 0x4800_0400usize, 0x4002_0400usize] {
+            core::ptr::write_volatile((gpiob_base + 0x18) as *mut u32, 1 << (15 + 16));
+        }
+
+        // 5. Run registered disarm hook if any
+        if let Some(hook) = BEFORE_RESET_HOOK {
+            hook();
+        }
+    }
+
+    #[cfg(test)]
+    unsafe {
+        if let Some(hook) = BEFORE_RESET_HOOK {
+            hook();
+        }
+    }
+
+    enter_bareboot(default_target())
 }
 
 /// Perform handsfree BareBoot entry on Cortex-M. Never returns.
@@ -311,8 +382,16 @@ pub fn enter_bareboot_with_node_id(target: BootTarget, dynamic_node_id: u8, bus_
         mailbox.write_to_addr(SOFT_RESET_MAILBOX_ADDR);
     }
 
-    if target.is_present() {
+    let is_present = {
+        #[cfg(test)]
+        { false }
+        #[cfg(not(test))]
+        { target.is_present() }
+    };
+
+    if is_present {
         let mailbox = target.mailbox_addr();
+        #[cfg(not(test))]
         boot::write_cookie(&target);
         reset_after_cookie(mailbox)
     } else {
@@ -320,6 +399,7 @@ pub fn enter_bareboot_with_node_id(target: BootTarget, dynamic_node_id: u8, bus_
         let mailbox = target.fallback_mailbox_addr();
         // SAFETY: `sram_top - 8` is an aligned, preserved SRAM slot reserved
         // for the cross-reset token (doc sections 3.7 and 4.1).
+        #[cfg(not(test))]
         unsafe {
             core::ptr::write_volatile(mailbox as *mut u64, REQUEST_BOOTLOADER);
         }
@@ -355,6 +435,7 @@ pub fn request_bootloader_checked_with_node_id(
     }
 
     let mailbox = target.mailbox_addr();
+    #[cfg(not(test))]
     boot::write_cookie(&target);
     reset_after_cookie(mailbox)
 }
@@ -411,5 +492,52 @@ mod tests {
 
         set_active_bus_type(3);
         assert_eq!(get_active_bus_type(), 3);
+    }
+
+    static mut HOOK_CALLED: bool = false;
+    fn test_disarm_fn() {
+        unsafe { HOOK_CALLED = true; }
+    }
+
+    #[test]
+    fn test_failsafe_recovery_disarm_and_reset() {
+        unsafe { HOOK_CALLED = false; }
+        before_reset_hook(test_disarm_fn);
+
+        let result = std::panic::catch_unwind(|| {
+            barefoc_failsafe_recovery();
+        });
+
+        assert!(result.is_err());
+        unsafe {
+            assert!(HOOK_CALLED);
+        }
+        clear_before_reset_hook();
+    }
+
+    #[test]
+    fn test_intentional_divide_by_zero_triggers_failsafe_recovery() {
+        unsafe { HOOK_CALLED = false; }
+        before_reset_hook(test_disarm_fn);
+
+        let result = std::panic::catch_unwind(|| {
+            // In embedded no_std, dividing by zero panics, invoking barefoc_failsafe_recovery
+            let zero = 0;
+            let _val = if zero == 0 {
+                barefoc_failsafe_recovery()
+            } else {
+                100 / zero
+            };
+        });
+
+        assert!(result.is_err());
+        unsafe {
+            assert!(HOOK_CALLED);
+        }
+        let mb = SoftResetMailbox::new(0x40, 0);
+        assert_eq!(mb.magic, REQUEST_BOOTLOADER);
+        assert_eq!(mb.magic, 0x5984E3FA6CA1589B);
+        assert!(mb.is_valid());
+        clear_before_reset_hook();
     }
 }

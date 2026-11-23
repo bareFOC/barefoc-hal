@@ -391,16 +391,14 @@ impl<'d, C, const CAP: usize, const MAX_ENTRIES: usize> Stm32I2cTarget<'d, C, CA
                 let frame = &self.write_buf[..bytes];
 
                 // BareBoot handsfree strobe. Checked BEFORE the user hooks and
-                // before the register server so a one-byte 0xF0 write is never
+                // before the register server so an in-band strobe is never
                 // mistaken for a register-pointer latch. `enter_bareboot`
                 // diverges (system reset), so no register state is touched on
                 // a match. MUST be serviced in interrupt context (see module
                 // docs / doc section 6).
                 #[cfg(feature = "bareboot")]
                 if let Some(target) = self.bootloader_target {
-                    if barefoc::boot::trigger_i2c(frame) {
-                        crate::bootloader::enter_bareboot(target);
-                    }
+                    i2c_isr_strobe_hook(frame, target);
                 }
 
                 // Raw-frame observer (e.g. handsfree bootloader trigger). Runs in
@@ -496,4 +494,34 @@ pub(crate) fn validate_address(addr7: u8) -> Result<(), Error> {
         0x00 | 0x01..=0x07 | 0x78..=0x7B | 0x7C..=0x7D | 0x7E..=0x7F => Err(Error::ReservedAddress),
         _ => Ok(()),
     }
+}
+
+/// Peripheral ISR strobe hook for I2C targets.
+///
+/// Evaluates an incoming write frame immediately in ISR context. If the frame is
+/// a single-byte `0xF0` or a write of `0xF0` to `RebootCommand` (`0x63` / `0x0063` / `0x0123`),
+/// this invokes `enter_bareboot` directly, preempting cooperative application tasks.
+#[cfg(feature = "bareboot")]
+pub fn i2c_isr_strobe_hook(frame: &[u8], target: BootTarget) -> bool {
+    if barefoc::boot::trigger_i2c(frame)
+        || (frame.len() >= 2 && frame[0] == 0x63 && frame[1] == barefoc::boot::I2C_CMD_ENTER_BOOTLOADER)
+        || (frame.len() >= 3 && frame[0] == 0x00 && frame[1] == 0x63 && frame[2] == barefoc::boot::I2C_CMD_ENTER_BOOTLOADER)
+        || (frame.len() >= 3 && frame[0] == 0x01 && frame[1] == 0x23 && frame[2] == barefoc::boot::I2C_CMD_ENTER_BOOTLOADER)
+    {
+        crate::bootloader::enter_bareboot(target);
+    }
+    false
+}
+
+/// Peripheral ISR strobe hook for I3C CCC and data frames.
+#[cfg(feature = "bareboot")]
+pub fn i3c_isr_strobe_hook(byte_or_ccc: u8, defining: Option<u8>, target: BootTarget) -> bool {
+    let triggered = match defining {
+        Some(def) => barefoc::boot::trigger_i3c_ccc(byte_or_ccc, def),
+        None => barefoc::boot::trigger_i3c_byte(byte_or_ccc),
+    };
+    if triggered {
+        crate::bootloader::enter_bareboot(target);
+    }
+    false
 }
