@@ -21,6 +21,7 @@ pub mod adc;
 pub mod any_sensor;
 pub mod clock;
 pub mod encoder;
+pub mod i2c_bus;
 
 #[cfg(feature = "embassy-stm32")]
 pub mod driver_6pwm;
@@ -38,6 +39,8 @@ pub mod opamp;
 
 #[cfg(all(feature = "embassy-stm32", feature = "_stm32h5", feature = "multibus"))]
 pub mod bus_target_i2c;
+#[cfg(all(feature = "embassy-stm32", feature = "_stm32h5", feature = "multibus"))]
+pub mod bus_target_i3c;
 #[cfg(all(feature = "embassy-stm32", feature = "_stm32h5", feature = "multibus"))]
 pub mod bus_target_spi;
 
@@ -60,18 +63,23 @@ pub use katapult::{
 
 #[cfg(feature = "bareboot")]
 pub use bootloader::{
-    barefoc_failsafe_recovery, before_reset_hook, clear_before_reset_hook, default_target,
-    enter_bareboot, enter_bareboot_with_node_id, get_active_bus_type, get_active_dynamic_node_id,
-    read_soft_reset_mailbox, request_bootloader_checked,
-    request_bootloader_checked_with_node_id, set_active_bus_type,
-    set_active_dynamic_node_id, NotPresent, SoftResetMailbox, DEFAULT_APP_BASE, DEFAULT_FLASH_BASE,
-    DEFAULT_SRAM_TOP, SOFT_RESET_MAILBOX_ADDR,
+    barefoc_failsafe_recovery, before_reset_hook, clear_before_reset_hook, clear_boot_loop_guard,
+    default_target, enter_bareboot, enter_bareboot_with_node_id, feed_iwdg, get_active_bus_type,
+    get_active_dynamic_node_id, read_soft_reset_mailbox, request_bootloader_checked,
+    request_bootloader_checked_with_node_id, set_active_bus_type, set_active_dynamic_node_id,
+    NotPresent, SoftResetMailbox, BOOT_LOOP_GUARD_ADDR, BOOT_LOOP_MAGIC, DEFAULT_APP_BASE,
+    DEFAULT_FLASH_BASE, DEFAULT_SRAM_TOP, SOFT_RESET_MAILBOX_ADDR,
 };
 
 pub use adc::{Stm32AdcPin, Stm32AdcPinFixed};
 pub use any_sensor::{AnySensor, AnySensorBuildError, DummySensor, SensorType};
 pub use clock::DwtClock;
 pub use encoder::Stm32Encoder;
+#[cfg(all(
+    feature = "embassy-stm32",
+    any(feature = "_stm32h5", feature = "_stm32g4")
+))]
+pub use i2c_bus::Stm32I2cBusControl;
 #[cfg(any(
     feature = "internal-temp",
     feature = "_stm32f4",
