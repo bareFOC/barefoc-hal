@@ -43,6 +43,41 @@ pub const DEFAULT_APP_BASE: u32 = 0x0800_2000;
 /// Default top of SRAM (STM32H503: 32 KiB at 0x20000000).
 pub const DEFAULT_SRAM_TOP: u32 = 0x2000_8000;
 
+/// Address of the 16-byte CRC32-protected `BootLoopGuard` in `.uninit` SRAM (`0x2000_7FD0..0x2000_7FE0`).
+pub const BOOT_LOOP_GUARD_ADDR: usize = 0x2000_7FD0;
+
+/// Magic identifier for [`BootLoopGuard`] (`"BBLP"`).
+pub const BOOT_LOOP_MAGIC: u32 = 0x4242_4C50;
+
+/// Clear the `BootLoopGuard` attempt counter in `.uninit` SRAM after healthy startup.
+pub fn clear_boot_loop_guard() {
+    let m = BOOT_LOOP_MAGIC.to_le_bytes();
+    let payload = [m[0], m[1], m[2], m[3], 0, 0, 0, 0, 0, 0, 0, 0];
+    let crc = crc32_ieee(&payload);
+    let record: [u32; 4] = [BOOT_LOOP_MAGIC, 0, 0, crc];
+    #[cfg(not(test))]
+    // SAFETY: `BOOT_LOOP_GUARD_ADDR` (`0x2000_7FD0`) is reserved outside both
+    // bootloader and application stacks specifically for the 16-byte `BootLoopGuard`.
+    unsafe {
+        let ptr = BOOT_LOOP_GUARD_ADDR as *mut [u32; 4];
+        core::ptr::write_volatile(ptr, record);
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+    #[cfg(test)]
+    let _ = record;
+}
+
+/// Reload the STM32H5 Independent Watchdog (`IWDG`, `0x4000_3000`).
+#[inline(always)]
+pub fn feed_iwdg() {
+    #[cfg(not(test))]
+    // SAFETY: Writing `0xAAAA` to `IWDG_KR` is a single atomic reload write and is
+    // a no-op if IWDG is not running.
+    unsafe {
+        core::ptr::write_volatile(0x4000_3000 as *mut u32, 0xAAAA);
+    }
+}
+
 /// Address of the uninitialized SRAM mailbox across warm resets on STM32H503.
 ///
 /// Spans `0x2000_7FE0..0x2000_8000` (32 bytes at the top of 32 KiB SRAM).
@@ -312,9 +347,13 @@ fn reset_after_cookie(mailbox: usize) -> ! {
     panic!("RESET_AFTER_COOKIE");
 }
 
+#[cfg(not(test))]
+static IN_FAILSAFE_RECOVERY: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
 /// Failsafe recovery handler for HardFault and Panic exceptions.
 ///
-/// Immediately disables all motor PWM timer channels (TIM1, TIM3, etc.) into high-impedance mode,
+/// Immediately disables active motor PWM timer channels into high-impedance mode,
 /// pulls gate driver `DRV_SLEEP` low, executes any registered driver disarm hook,
 /// writes the `SoftResetMailbox` and `REQUEST_BOOTLOADER` cookie (`0x5984E3FA6CA1589B`),
 /// flushes data caches with DSB barrier, and initiates warm system reset into BareBoot.
@@ -323,27 +362,57 @@ pub fn barefoc_failsafe_recovery() -> ! {
     cortex_m::interrupt::disable();
 
     #[cfg(not(test))]
+    if IN_FAILSAFE_RECOVERY.swap(true, core::sync::atomic::Ordering::SeqCst) {
+        reset_after_cookie(SOFT_RESET_MAILBOX_ADDR);
+    }
+
+    #[cfg(all(not(test), feature = "_stm32h5"))]
+    // SAFETY: On STM32H503, we check RCC peripheral clock enable bits before writing
+    // TIM1/TIM2/TIM3/GPIOB registers so unclocked peripherals never trigger a BusFault.
     unsafe {
-        // 1. TIM1 (STM32H5: 0x4001_2C00, F4/G4: 0x4001_0000)
-        for base in [0x4001_2C00usize, 0x4001_0000usize] {
-            core::ptr::write_volatile((base + 0x20) as *mut u32, 0); // CCER
-            core::ptr::write_volatile((base + 0x44) as *mut u32, 0); // BDTR
-            core::ptr::write_volatile((base + 0x144) as *mut u32, 0);
+        const RCC_AHB2ENR: *const u32 = 0x4402_0C8C as *const u32;
+        const RCC_APB1LENR: *const u32 = 0x4402_0C9C as *const u32;
+        const RCC_APB2ENR: *const u32 = 0x4402_0CA4 as *const u32;
+
+        let apb2 = core::ptr::read_volatile(RCC_APB2ENR);
+        if (apb2 & (1 << 11)) != 0 {
+            core::ptr::write_volatile((0x4001_2C00usize + 0x20) as *mut u32, 0); // TIM1 CCER
+            core::ptr::write_volatile((0x4001_2C00usize + 0x44) as *mut u32, 0); // TIM1 BDTR
         }
-        // 2. TIM3 (0x4000_0400)
+        let apb1l = core::ptr::read_volatile(RCC_APB1LENR);
+        if (apb1l & (1 << 0)) != 0 {
+            core::ptr::write_volatile((0x4000_0000usize + 0x20) as *mut u32, 0); // TIM2 CCER
+        }
+        if (apb1l & (1 << 1)) != 0 {
+            core::ptr::write_volatile((0x4000_0400usize + 0x20) as *mut u32, 0); // TIM3 CCER
+        }
+        let ahb2 = core::ptr::read_volatile(RCC_AHB2ENR);
+        if (ahb2 & (1 << 1)) != 0 {
+            core::ptr::write_volatile((0x4202_0400usize + 0x18) as *mut u32, 1 << (15 + 16));
+        }
+
+        if let Some(hook) = BEFORE_RESET_HOOK {
+            hook();
+        }
+    }
+
+    #[cfg(all(not(test), not(feature = "_stm32h5")))]
+    unsafe {
+        // TIM1 (F4/G4: 0x4001_0000)
+        core::ptr::write_volatile((0x4001_0000usize + 0x20) as *mut u32, 0);
+        core::ptr::write_volatile((0x4001_0000usize + 0x44) as *mut u32, 0);
+        // TIM3 (0x4000_0400)
         core::ptr::write_volatile((0x4000_0400 + 0x20) as *mut u32, 0);
-        // 3. TIM2 (0x4000_0000), TIM4 (0x4000_0800), TIM8 (0x4001_0400), TIM20 (0x4001_3400)
+        // TIM2 (0x4000_0000), TIM4 (0x4000_0800), TIM8 (0x4001_0400), TIM20 (0x4001_3400)
         for base in [0x4000_0000usize, 0x4000_0800usize, 0x4001_0400usize, 0x4001_3400usize] {
             core::ptr::write_volatile((base + 0x20) as *mut u32, 0);
             core::ptr::write_volatile((base + 0x44) as *mut u32, 0);
         }
-
-        // 4. Pull DRV_SLEEP low (PB15 on GPIOB)
-        for gpiob_base in [0x4202_0400usize, 0x4800_0400usize, 0x4002_0400usize] {
+        // Pull DRV_SLEEP low (PB15 on GPIOB)
+        for gpiob_base in [0x4800_0400usize, 0x4002_0400usize] {
             core::ptr::write_volatile((gpiob_base + 0x18) as *mut u32, 1 << (15 + 16));
         }
 
-        // 5. Run registered disarm hook if any
         if let Some(hook) = BEFORE_RESET_HOOK {
             hook();
         }
