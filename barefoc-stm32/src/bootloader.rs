@@ -38,8 +38,8 @@ use barefoc::boot::{self, BootTarget, REQUEST_APP, REQUEST_BOOTLOADER, REQUEST_S
 /// Matches `crate::FLASH_BOOT_ADDRESS`. New callers should build their own
 /// [`BootTarget`] when the board uses a different layout.
 pub const DEFAULT_FLASH_BASE: u32 = 0x0800_0000;
-/// Default application base (STM32H503 application is linked at 0x08002000).
-pub const DEFAULT_APP_BASE: u32 = 0x0800_2000;
+/// Default application base (STM32H503 application is linked at 0x08004000).
+pub const DEFAULT_APP_BASE: u32 = 0x0800_4000;
 /// Default top of SRAM (STM32H503: 32 KiB at 0x20000000).
 pub const DEFAULT_SRAM_TOP: u32 = 0x2000_8000;
 
