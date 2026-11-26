@@ -337,6 +337,22 @@ impl<'d, C, const CAP: usize, const MAX_ENTRIES: usize>
         self.write_len == 0
     }
 
+    /// Refresh the preloaded TX FIFO from the current register map when the bus is idle.
+    ///
+    /// Should be called after telemetry updates so subsequent host reads observe fresh
+    /// register bytes without colliding with an in-flight I3C frame.
+    pub fn refresh_read_buffer(&mut self) {
+        if !self.is_frame_idle() {
+            return;
+        }
+        // SAFETY: `I3C2` is clocked and enabled for the lifetime of `Stm32I3cTarget`.
+        let evr = unsafe { read_volatile(I3C2_EVR) };
+        if evr & (EVR_RXFNEF | EVR_FCF) != 0 {
+            return;
+        }
+        self.preload_read();
+    }
+
     /// Reposition the register pointer after a short read or non-read frame.
     fn reposition_read_ptr(&mut self, delivered: usize) {
         let extent = self.server.map().extent();
@@ -380,10 +396,12 @@ impl<'d, C, const CAP: usize, const MAX_ENTRIES: usize>
         // the bus), then arm TGTTDR and push available FIFO bytes.
         unsafe {
             write_volatile(I3C2_TGTTDR, 0);
-            write_volatile(I3C2_CFGR, read_volatile(I3C2_CFGR) | CFGR_TXFLUSH);
-            for _ in 0..64 {
-                if read_volatile(I3C2_EVR) & EVR_TXFEF != 0 {
-                    break;
+            if read_volatile(I3C2_EVR) & EVR_TXFEF == 0 {
+                write_volatile(I3C2_CFGR, read_volatile(I3C2_CFGR) | CFGR_TXFLUSH);
+                for _ in 0..64 {
+                    if read_volatile(I3C2_EVR) & EVR_TXFEF != 0 {
+                        break;
+                    }
                 }
             }
             if filled > 0 {
