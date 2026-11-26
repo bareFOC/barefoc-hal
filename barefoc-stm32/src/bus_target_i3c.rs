@@ -95,6 +95,15 @@ const CCC_DIRECT_RSTACT: u8 = 0x9A;
 const CCC_DIRECT_RSTACT_ALT: u8 = 0xAA;
 const RSTACT_DEF_TGT_RESET: u8 = 0x02;
 
+/// Compute the STM32 `I3C2_EPIDR` register value from the 96-bit hardware UID.
+///
+/// Uses the MIPI Manufacturer ID (`0x0114 << 17`) and the full 16-bit XOR mix
+/// `(uid0 ^ uid1 ^ uid2) & 0xFFFF`, matching `bareBoot` (`targets/stm32h503-i3c`).
+#[inline]
+pub(crate) fn compute_epidr(uid0: u32, uid1: u32, uid2: u32) -> u32 {
+    (0x0114 << 17) | ((uid0 ^ uid1 ^ uid2) & 0xFFFF)
+}
+
 /// Pure predicate checking whether an I3C `EVR_RSTF` event should trigger
 /// bootloader failsafe recovery.
 ///
@@ -220,16 +229,12 @@ impl<'d, C, const CAP: usize, const MAX_ENTRIES: usize>
             let uid0 = read_volatile(UID_BASE as *const u32);
             let uid1 = read_volatile((UID_BASE + 4) as *const u32);
             let uid2 = read_volatile((UID_BASE + 8) as *const u32);
-            let instance_id = (uid0 ^ uid1 ^ uid2) & 0x0F;
 
             write_volatile(I3C2_CFGR, 0);
             write_volatile(I3C2_CFGR, (1 << 3) | (1 << 4)); // RSTPTRN | EXITPTRN
             write_volatile(I3C2_BCR, 0x06);
             write_volatile(I3C2_DCR, 0x63);
-            write_volatile(
-                I3C2_EPIDR,
-                (0x0114 << 17) | (instance_id << 12) | 0x0001,
-            );
+            write_volatile(I3C2_EPIDR, compute_epidr(uid0, uid1, uid2));
             write_volatile(I3C2_DEVR0, ((addr7 as u32 & 0x7F) << 1) | 1);
             write_volatile(I3C2_MAXRLR, 128);
             write_volatile(I3C2_MAXWLR, 128);
@@ -638,5 +643,22 @@ mod tests {
             desired_ier_for_tx(0, 16),
             I3C2_EVENT_IRQ_MASK | EVR_TXFNFF
         );
+    }
+
+    #[test]
+    fn compute_epidr_uses_full_16bit_uid_mix_matching_bareboot() {
+        assert_eq!(compute_epidr(0, 0, 0), 0x0114 << 17);
+        assert_eq!(
+            compute_epidr(0x1234_5678, 0x0000_0000, 0x0000_0000),
+            (0x0114 << 17) | 0x5678
+        );
+        // Two UIDs that share the same low 4 bits must still produce distinct EPIDRs.
+        let a = compute_epidr(0x0000_0015, 0, 0);
+        let b = compute_epidr(0x0000_0025, 0, 0);
+        assert_ne!(a, b);
+        assert_eq!(a >> 17, 0x0114);
+        assert_eq!(b >> 17, 0x0114);
+        assert_eq!(a & 0xFFFF, 0x0015);
+        assert_eq!(b & 0xFFFF, 0x0025);
     }
 }
