@@ -72,6 +72,20 @@ const EVR_RSTF: u32 = 1 << 27;
 pub const I3C2_EVENT_IRQ_MASK: u32 =
     EVR_RXFNEF | EVR_FCF | EVR_RXTGTENDF | EVR_ERRF | EVR_DAUPDF | EVR_RSTF;
 
+/// Compute the `I3C2_IER` interrupt mask for the current TX FIFO state.
+///
+/// Enables `EVR_TXFNFF` only while `read_pos < read_len` so multi-byte reads
+/// exceeding the hardware TX FIFO depth (`> 8` bytes) are refilled in ISR
+/// without causing an interrupt storm once the TX buffer is exhausted.
+#[inline]
+pub(crate) fn desired_ier_for_tx(read_pos: usize, read_len: usize) -> u32 {
+    if read_pos < read_len {
+        I3C2_EVENT_IRQ_MASK | EVR_TXFNFF
+    } else {
+        I3C2_EVENT_IRQ_MASK
+    }
+}
+
 const DEVR0_RSTACT_SHIFT: u32 = 22;
 const DEVR0_RSTACT_MASK: u32 = 0x03;
 const DEVR0_RSTVAL: u32 = 1 << 24;
@@ -260,7 +274,7 @@ impl<'d, C, const CAP: usize, const MAX_ENTRIES: usize>
 
     #[inline]
     fn desired_ier(&self) -> u32 {
-        I3C2_EVENT_IRQ_MASK
+        desired_ier_for_tx(self.read_pos, self.read_len)
     }
 
     /// Return `true` when `PB4` (`I3C2_SDA`) is currently reading low (`0`).
@@ -609,5 +623,20 @@ mod tests {
         }
         assert!(update_stuck_sda_counter(true, false, &mut ticks, 50));
         assert_eq!(ticks, 0);
+    }
+
+    #[test]
+    fn desired_ier_for_tx_enables_txfnff_only_when_bytes_remain() {
+        assert_eq!(desired_ier_for_tx(0, 0), I3C2_EVENT_IRQ_MASK);
+        assert_eq!(desired_ier_for_tx(8, 8), I3C2_EVENT_IRQ_MASK);
+        assert_eq!(desired_ier_for_tx(32, 32), I3C2_EVENT_IRQ_MASK);
+        assert_eq!(
+            desired_ier_for_tx(8, 32),
+            I3C2_EVENT_IRQ_MASK | EVR_TXFNFF
+        );
+        assert_eq!(
+            desired_ier_for_tx(0, 16),
+            I3C2_EVENT_IRQ_MASK | EVR_TXFNFF
+        );
     }
 }
