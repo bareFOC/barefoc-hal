@@ -13,8 +13,8 @@ use barefoc::traits::storage::ConfigStorage;
 /// Magic identifier for valid flash configuration headers ("FISH" in ASCII / hex).
 pub const FLASH_MAGIC: u32 = 0x4649_5348;
 
-/// Configuration schema version.
-pub const FLASH_SCHEMA_VERSION: u16 = 1;
+/// Configuration schema version (v2: ControlTable + KinematicsFlashConfig).
+pub const FLASH_SCHEMA_VERSION: u16 = 2;
 
 /// Byte offset of Bank 2 Sector 14 relative to `FLASH_BASE` (`0x0800_0000`).
 pub const SECTOR_14_OFFSET: u32 = 0x0001_C000;
@@ -28,8 +28,159 @@ pub const SECTOR_SIZE: u32 = 8192;
 /// Size of the flash persistence header in bytes.
 pub const HEADER_SIZE: usize = 32;
 
-/// Total stored record size (32-byte header + 96-byte EEPROM payload = 128 bytes).
-pub const RECORD_SIZE: usize = HEADER_SIZE + EEPROM_AREA_SIZE;
+/// Maximum number of LUT points persisted in flash.
+pub const MAX_FLASH_LUT_POINTS: usize = 16;
+
+/// Size of the serialized kinematics configuration area in bytes (multiple of 16 bytes).
+pub const KINEMATICS_AREA_SIZE: usize = 192;
+
+/// Combined v2 payload size (ControlTable EEPROM + KinematicsFlashConfig).
+pub const PAYLOAD_V2_SIZE: usize = EEPROM_AREA_SIZE + KINEMATICS_AREA_SIZE;
+
+/// Total stored record size (32-byte header + 288-byte v2 payload = 320 bytes).
+pub const RECORD_SIZE: usize = HEADER_SIZE + PAYLOAD_V2_SIZE;
+
+/// Flash-persisted runtime kinematics configuration (`TopologyConfig` + `DynamicTransmission` + outer PIDs).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KinematicsFlashConfig {
+    pub topology_mode: u8,
+    pub coupling_mask: u8,
+    pub sensor_map: [u8; 4],
+    pub transmission_type: u8,
+    pub outer_downsample: u8,
+    pub gear_ratio: f32,
+    pub backlash_delta: f32,
+    pub omega_thresh: f32,
+    pub torsional_stiffness: f32,
+    pub joint_offset_alpha: f32,
+    pub joint_offset_beta: f32,
+    pub diff_matrix: [f32; 4],
+    pub linkage_lengths: [f32; 4],
+    pub lut_mot_min: f32,
+    pub lut_mot_max: f32,
+    pub lut_points: u16,
+    pub lut_table: [f32; MAX_FLASH_LUT_POINTS],
+    pub outer_pid_alpha: [f32; 5],
+    pub outer_pid_beta: [f32; 5],
+}
+
+impl Default for KinematicsFlashConfig {
+    fn default() -> Self {
+        Self::default_const()
+    }
+}
+
+impl KinematicsFlashConfig {
+    /// Const-evaluable factory default kinematics configuration.
+    pub const fn default_const() -> Self {
+        Self {
+            topology_mode: 0, // Four1Dof
+            coupling_mask: 0x00,
+            sensor_map: [0, 1, 2, 3],
+            transmission_type: 0, // LinearGear
+            outer_downsample: 10,
+            gear_ratio: 1.0,
+            backlash_delta: 0.0,
+            omega_thresh: 0.0,
+            torsional_stiffness: 0.0,
+            joint_offset_alpha: 0.0,
+            joint_offset_beta: 0.0,
+            diff_matrix: [0.5, 0.5, 0.5, -0.5],
+            linkage_lengths: [1.0, 1.0, 1.0, 1.0],
+            lut_mot_min: 0.0,
+            lut_mot_max: 1.0,
+            lut_points: 0,
+            lut_table: [0.0; MAX_FLASH_LUT_POINTS],
+            outer_pid_alpha: [20.0, 0.0, 0.0, 50.0, 0.0],
+            outer_pid_beta: [20.0, 0.0, 0.0, 50.0, 0.0],
+        }
+    }
+    /// Serialize kinematics configuration to 192 little-endian bytes.
+    pub fn to_bytes(&self) -> [u8; KINEMATICS_AREA_SIZE] {
+        let mut buf = [0u8; KINEMATICS_AREA_SIZE];
+        buf[0] = self.topology_mode;
+        buf[1] = self.coupling_mask;
+        buf[2..6].copy_from_slice(&self.sensor_map);
+        buf[6] = self.transmission_type;
+        buf[7] = self.outer_downsample;
+        buf[8..12].copy_from_slice(&self.gear_ratio.to_le_bytes());
+        buf[12..16].copy_from_slice(&self.backlash_delta.to_le_bytes());
+        buf[16..20].copy_from_slice(&self.omega_thresh.to_le_bytes());
+        buf[20..24].copy_from_slice(&self.torsional_stiffness.to_le_bytes());
+        buf[24..28].copy_from_slice(&self.joint_offset_alpha.to_le_bytes());
+        buf[28..32].copy_from_slice(&self.joint_offset_beta.to_le_bytes());
+        for (i, &v) in self.diff_matrix.iter().enumerate() {
+            buf[32 + i * 4..36 + i * 4].copy_from_slice(&v.to_le_bytes());
+        }
+        for (i, &v) in self.linkage_lengths.iter().enumerate() {
+            buf[48 + i * 4..52 + i * 4].copy_from_slice(&v.to_le_bytes());
+        }
+        buf[64..68].copy_from_slice(&self.lut_mot_min.to_le_bytes());
+        buf[68..72].copy_from_slice(&self.lut_mot_max.to_le_bytes());
+        buf[72..74].copy_from_slice(&self.lut_points.to_le_bytes());
+        for (i, &v) in self.lut_table.iter().enumerate() {
+            buf[76 + i * 4..80 + i * 4].copy_from_slice(&v.to_le_bytes());
+        }
+        for (i, &v) in self.outer_pid_alpha.iter().enumerate() {
+            buf[140 + i * 4..144 + i * 4].copy_from_slice(&v.to_le_bytes());
+        }
+        for (i, &v) in self.outer_pid_beta.iter().enumerate() {
+            buf[160 + i * 4..164 + i * 4].copy_from_slice(&v.to_le_bytes());
+        }
+        buf
+    }
+
+    /// Deserialize kinematics configuration from a 192-byte slice.
+    pub fn from_bytes(buf: &[u8]) -> Option<Self> {
+        if buf.len() < KINEMATICS_AREA_SIZE {
+            return None;
+        }
+        let read_f32 = |off: usize| -> f32 {
+            f32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
+        };
+        let mut diff_matrix = [0.0f32; 4];
+        for i in 0..4 {
+            diff_matrix[i] = read_f32(32 + i * 4);
+        }
+        let mut linkage_lengths = [0.0f32; 4];
+        for i in 0..4 {
+            linkage_lengths[i] = read_f32(48 + i * 4);
+        }
+        let mut lut_table = [0.0f32; MAX_FLASH_LUT_POINTS];
+        for i in 0..MAX_FLASH_LUT_POINTS {
+            lut_table[i] = read_f32(76 + i * 4);
+        }
+        let mut outer_pid_alpha = [0.0f32; 5];
+        for i in 0..5 {
+            outer_pid_alpha[i] = read_f32(140 + i * 4);
+        }
+        let mut outer_pid_beta = [0.0f32; 5];
+        for i in 0..5 {
+            outer_pid_beta[i] = read_f32(160 + i * 4);
+        }
+        Some(Self {
+            topology_mode: buf[0],
+            coupling_mask: buf[1],
+            sensor_map: [buf[2], buf[3], buf[4], buf[5]],
+            transmission_type: buf[6],
+            outer_downsample: buf[7],
+            gear_ratio: read_f32(8),
+            backlash_delta: read_f32(12),
+            omega_thresh: read_f32(16),
+            torsional_stiffness: read_f32(20),
+            joint_offset_alpha: read_f32(24),
+            joint_offset_beta: read_f32(28),
+            diff_matrix,
+            linkage_lengths,
+            lut_mot_min: read_f32(64),
+            lut_mot_max: read_f32(68),
+            lut_points: u16::from_le_bytes([buf[72], buf[73]]),
+            lut_table,
+            outer_pid_alpha,
+            outer_pid_beta,
+        })
+    }
+}
 
 /// Standard IEEE 802.3 CRC32 calculation.
 pub fn crc32_ieee(data: &[u8]) -> u32 {
@@ -91,7 +242,7 @@ impl SectorHeader {
     pub fn is_valid_structure(&self) -> bool {
         self.magic == FLASH_MAGIC
             && self.version == FLASH_SCHEMA_VERSION
-            && self.payload_len == (EEPROM_AREA_SIZE as u16)
+            && self.payload_len == (PAYLOAD_V2_SIZE as u16)
     }
 }
 
@@ -171,8 +322,8 @@ impl<B: FlashBackend> H5FlashStorage<B> {
         }
     }
 
-    /// Read and validate a slot record.
-    fn inspect_slot(&mut self, slot: u8, payload_out: &mut [u8; EEPROM_AREA_SIZE]) -> Option<u32> {
+    /// Read and validate a v2 slot record.
+    fn inspect_slot(&mut self, slot: u8, payload_out: &mut [u8; PAYLOAD_V2_SIZE]) -> Option<u32> {
         let offset = Self::slot_offset(slot);
         let mut record = [0u8; RECORD_SIZE];
         if self.backend.read(offset, &mut record).is_err() {
@@ -193,91 +344,101 @@ impl<B: FlashBackend> H5FlashStorage<B> {
         payload_out.copy_from_slice(payload);
         Some(header.seq)
     }
-}
 
-impl<B: FlashBackend> ConfigStorage for H5FlashStorage<B> {
-    type Error = FlashStorageError;
-
-    fn load_config(&mut self, table: &mut ControlTable) -> Result<(), Self::Error> {
-        let mut payload_0 = [0u8; EEPROM_AREA_SIZE];
-        let mut payload_1 = [0u8; EEPROM_AREA_SIZE];
+    /// Load both `ControlTable` EEPROM and `KinematicsFlashConfig` from Sector 14/15.
+    pub fn load_config_v2(
+        &mut self,
+        table: &mut ControlTable,
+        kin: &mut KinematicsFlashConfig,
+    ) -> Result<(), FlashStorageError> {
+        let mut payload_0 = [0u8; PAYLOAD_V2_SIZE];
+        let mut payload_1 = [0u8; PAYLOAD_V2_SIZE];
 
         let valid_0 = self.inspect_slot(0, &mut payload_0);
         let valid_1 = self.inspect_slot(1, &mut payload_1);
 
-        match (valid_0, valid_1) {
+        let chosen = match (valid_0, valid_1) {
             (Some(seq_0), Some(seq_1)) => {
                 if seq_0 >= seq_1 {
-                    table.eeprom_bytes_mut().copy_from_slice(&payload_0);
                     self.active_slot = Some(0);
                     self.next_seq = seq_0.wrapping_add(1);
+                    Some(&payload_0)
                 } else {
-                    table.eeprom_bytes_mut().copy_from_slice(&payload_1);
                     self.active_slot = Some(1);
                     self.next_seq = seq_1.wrapping_add(1);
+                    Some(&payload_1)
                 }
-                table.clear_error_flag(error_flags::FLASH_CORRUPT);
-                Ok(())
             }
             (Some(seq_0), None) => {
-                table.eeprom_bytes_mut().copy_from_slice(&payload_0);
                 self.active_slot = Some(0);
                 self.next_seq = seq_0.wrapping_add(1);
-                table.clear_error_flag(error_flags::FLASH_CORRUPT);
-                Ok(())
+                Some(&payload_0)
             }
             (None, Some(seq_1)) => {
-                table.eeprom_bytes_mut().copy_from_slice(&payload_1);
                 self.active_slot = Some(1);
                 self.next_seq = seq_1.wrapping_add(1);
-                table.clear_error_flag(error_flags::FLASH_CORRUPT);
-                Ok(())
+                Some(&payload_1)
             }
-            (None, None) => {
-                // Both slots invalid or corrupted; restore defaults and flag error
-                table.load_factory_defaults();
-                table.set_error_flag(error_flags::FLASH_CORRUPT);
-                self.active_slot = None;
-                self.next_seq = 1;
-                Ok(())
+            (None, None) => None,
+        };
+
+        if let Some(payload) = chosen {
+            table
+                .eeprom_bytes_mut()
+                .copy_from_slice(&payload[..EEPROM_AREA_SIZE]);
+            if let Some(decoded) =
+                KinematicsFlashConfig::from_bytes(&payload[EEPROM_AREA_SIZE..PAYLOAD_V2_SIZE])
+            {
+                *kin = decoded;
             }
+            table.clear_error_flag(error_flags::FLASH_CORRUPT);
+        } else {
+            table.load_factory_defaults();
+            *kin = KinematicsFlashConfig::default();
+            table.set_error_flag(error_flags::FLASH_CORRUPT);
+            self.active_slot = None;
+            self.next_seq = 1;
         }
+        Ok(())
     }
 
-    fn save_config(&mut self, table: &ControlTable) -> Result<(), Self::Error> {
-        // Target the inactive ping-pong slot
+    /// Save both `ControlTable` EEPROM and `KinematicsFlashConfig` atomically to the inactive sector.
+    pub fn save_config_v2(
+        &mut self,
+        table: &ControlTable,
+        kin: &KinematicsFlashConfig,
+    ) -> Result<(), FlashStorageError> {
         let target_slot = match self.active_slot {
             Some(0) => 1,
             _ => 0,
         };
 
         let target_offset = Self::slot_offset(target_slot);
-        let payload = table.eeprom_bytes();
-        let crc = crc32_ieee(payload);
+        let mut payload = [0u8; PAYLOAD_V2_SIZE];
+        payload[..EEPROM_AREA_SIZE].copy_from_slice(table.eeprom_bytes());
+        payload[EEPROM_AREA_SIZE..PAYLOAD_V2_SIZE].copy_from_slice(&kin.to_bytes());
+        let crc = crc32_ieee(&payload);
 
         let header = SectorHeader {
             magic: FLASH_MAGIC,
             version: FLASH_SCHEMA_VERSION,
-            payload_len: EEPROM_AREA_SIZE as u16,
+            payload_len: PAYLOAD_V2_SIZE as u16,
             seq: self.next_seq,
             crc32: crc,
         };
 
         let mut record = [0u8; RECORD_SIZE];
         record[0..HEADER_SIZE].copy_from_slice(&header.to_bytes());
-        record[HEADER_SIZE..RECORD_SIZE].copy_from_slice(payload);
+        record[HEADER_SIZE..RECORD_SIZE].copy_from_slice(&payload);
 
-        // 1. Erase target sector
         self.backend
             .erase(target_offset, target_offset + SECTOR_SIZE)
             .map_err(|_| FlashStorageError::EraseError)?;
 
-        // 2. Program target sector record
         self.backend
             .write(target_offset, &record)
             .map_err(|_| FlashStorageError::WriteError)?;
 
-        // 3. Read back and verify
         let mut readback = [0u8; RECORD_SIZE];
         self.backend
             .read(target_offset, &mut readback)
@@ -287,11 +448,22 @@ impl<B: FlashBackend> ConfigStorage for H5FlashStorage<B> {
             return Err(FlashStorageError::VerifyError);
         }
 
-        // Successfully committed to target slot
         self.active_slot = Some(target_slot);
         self.next_seq = self.next_seq.wrapping_add(1);
-
         Ok(())
+    }
+}
+
+impl<B: FlashBackend> ConfigStorage for H5FlashStorage<B> {
+    type Error = FlashStorageError;
+
+    fn load_config(&mut self, table: &mut ControlTable) -> Result<(), Self::Error> {
+        let mut kin = KinematicsFlashConfig::default();
+        self.load_config_v2(table, &mut kin)
+    }
+
+    fn save_config(&mut self, table: &ControlTable) -> Result<(), Self::Error> {
+        self.save_config_v2(table, &KinematicsFlashConfig::default())
     }
 
     fn factory_reset(&mut self, table: &mut ControlTable) -> Result<(), Self::Error> {
@@ -425,5 +597,47 @@ mod tests {
 
         assert_eq!(fallback_storage.active_slot(), Some(0));
         assert_eq!(fallback_table.node_id(), 0x42); // Reverted to slot 0 valid content
+    }
+
+    #[test]
+    fn test_v2_kinematics_crc32_round_trip() {
+        let mock = MockFlashBackend::<0x20000>::new();
+        let mut storage = H5FlashStorage::new(mock);
+        let mut table = ControlTable::new();
+        table.set_node_id(0x45);
+
+        let mut kin = KinematicsFlashConfig::default();
+        kin.topology_mode = 1; // Two2Dof
+        kin.coupling_mask = 0x03;
+        kin.sensor_map = [2, 3, 0, 1];
+        kin.transmission_type = 1; // CoupledDifferential
+        kin.gear_ratio = 2.5;
+        kin.backlash_delta = 0.012;
+        kin.joint_offset_alpha = 0.25;
+        kin.joint_offset_beta = -0.5;
+        kin.diff_matrix = [0.5, 0.5, 0.5, -0.5];
+        kin.linkage_lengths = [100.0, 30.0, 90.0, 40.0];
+        kin.lut_mot_min = -1.0;
+        kin.lut_mot_max = 1.0;
+        kin.lut_points = 4;
+        kin.lut_table[0..4].copy_from_slice(&[-0.5, -0.1, 0.1, 0.5]);
+        kin.outer_pid_alpha = [18.0, 0.5, 0.02, 40.0, 100.0];
+        kin.outer_pid_beta = [16.0, 0.2, 0.01, 35.0, 80.0];
+
+        storage.save_config_v2(&table, &kin).unwrap();
+
+        let mut reboot_storage = H5FlashStorage::new(storage.backend);
+        let mut reboot_table = ControlTable::new();
+        let mut reboot_kin = KinematicsFlashConfig::default();
+        reboot_storage
+            .load_config_v2(&mut reboot_table, &mut reboot_kin)
+            .unwrap();
+
+        assert_eq!(reboot_table.node_id(), 0x45);
+        assert_eq!(reboot_kin, kin);
+        assert_eq!(
+            reboot_table.hardware_error_status() & error_flags::FLASH_CORRUPT,
+            0
+        );
     }
 }
