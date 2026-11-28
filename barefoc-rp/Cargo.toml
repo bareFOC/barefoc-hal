@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Official Raspberry Pi RP2040 / RP2350 hardware abstraction bridges for barefoc."
 
 [dependencies]
-barefoc = { path = "../../bareFOC", default-features = false }
+barefoc = { path = "../../barefoc-core", default-features = false }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 

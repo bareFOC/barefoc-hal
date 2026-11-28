@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Official CH32 (WCH RISC-V) hardware abstraction bridges for barefoc, built on ch32-hal."
 
 [dependencies]
-barefoc = { path = "../../bareFOC", default-features = false }
+barefoc = { path = "../../barefoc-core", default-features = false }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 

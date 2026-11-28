@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Official ESP32 hardware abstraction bridges for barefoc, ported from Arduino SimpleFOC."
 
 [dependencies]
-barefoc = { path = "../../bareFOC" }
+barefoc = { path = "../../barefoc-core" }
 embedded-hal = { workspace = true }
 libm = { workspace = true }
 
